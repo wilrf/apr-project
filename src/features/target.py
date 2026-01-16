@@ -16,8 +16,12 @@ def identify_underdog(row: pd.Series) -> Optional[str]:
         row: Game row with spread and team information
 
     Returns:
-        Underdog team abbreviation, or None if spread < 3
+        Underdog team abbreviation, or None if spread < 3 or data is missing
     """
+    # Check for missing spread or favorite data first
+    if pd.isna(row["spread_favorite"]) or pd.isna(row["team_favorite_id"]):
+        return None
+
     spread = abs(row["spread_favorite"])
 
     if spread < MINIMUM_SPREAD:

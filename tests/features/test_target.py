@@ -35,6 +35,39 @@ class TestIdentifyUnderdog:
         })
         assert identify_underdog(row) is None
 
+    def test_handles_nan_spread(self):
+        """Returns None when spread_favorite is NaN."""
+        import numpy as np
+        row = pd.Series({
+            "home_team": "DET",
+            "away_team": "KC",
+            "spread_favorite": np.nan,
+            "team_favorite_id": "KC",
+        })
+        assert identify_underdog(row) is None
+
+    def test_handles_nan_favorite(self):
+        """Returns None when team_favorite_id is NaN."""
+        import numpy as np
+        row = pd.Series({
+            "home_team": "DET",
+            "away_team": "KC",
+            "spread_favorite": -6.0,
+            "team_favorite_id": np.nan,
+        })
+        assert identify_underdog(row) is None
+
+    def test_handles_both_nan(self):
+        """Returns None when both spread and favorite are NaN."""
+        import numpy as np
+        row = pd.Series({
+            "home_team": "DET",
+            "away_team": "KC",
+            "spread_favorite": np.nan,
+            "team_favorite_id": np.nan,
+        })
+        assert identify_underdog(row) is None
+
 
 class TestCalculateUpsetTarget:
     @pytest.fixture

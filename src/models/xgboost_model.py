@@ -121,7 +121,8 @@ class UpsetXGBoost:
         importance = self.model.get_booster().get_score(importance_type=importance_type)
 
         # Map back to feature names
+        # When fitted with DataFrame, get_score() uses actual feature names as keys
         return {
-            name: importance.get(f"f{i}", 0.0)
-            for i, name in enumerate(self.feature_names)
+            name: importance.get(name, 0.0)
+            for name in self.feature_names
         }

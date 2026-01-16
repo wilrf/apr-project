@@ -26,10 +26,24 @@ def calculate_calibration_metrics(
     prob_true, prob_pred = calibration_curve(y_true, y_pred, n_bins=n_bins)
 
     # Expected Calibration Error (ECE)
-    bin_counts = np.histogram(y_pred, bins=n_bins)[0]
-    bin_weights = bin_counts / len(y_pred)
+    # calibration_curve drops empty bins, so we must compute weights
+    # based on which predictions fall into the bins it actually returns
+    bin_edges = np.linspace(0, 1, n_bins + 1)
+    bin_indices = np.digitize(y_pred, bin_edges[1:-1])  # Assign predictions to bins
 
-    ece = np.sum(np.abs(prob_true - prob_pred) * bin_weights[:len(prob_true)])
+    # Count samples in bins that calibration_curve kept (non-empty bins)
+    # prob_pred contains the mean predicted probability for each non-empty bin
+    bin_weights = np.zeros(len(prob_pred))
+    for i, mean_pred in enumerate(prob_pred):
+        # Find predictions closest to this bin's mean
+        bin_idx = np.argmin(np.abs(bin_edges[:-1] + 0.5 / n_bins - mean_pred))
+        bin_weights[i] = np.sum(bin_indices == bin_idx) / len(y_pred)
+
+    # Normalize weights to sum to 1 (only counting non-empty bins)
+    if bin_weights.sum() > 0:
+        bin_weights = bin_weights / bin_weights.sum()
+
+    ece = np.sum(np.abs(prob_true - prob_pred) * bin_weights)
 
     return {
         "calibration_error": float(ece),
