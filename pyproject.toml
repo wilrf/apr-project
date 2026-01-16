@@ -1,0 +1,18 @@
+[project]
+name = "nfl-upset-prediction"
+version = "0.1.0"
+description = "XGBoost vs LSTM comparison for NFL upset prediction"
+requires-python = ">=3.10"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
+addopts = "-v --tb=short"
+
+[tool.black]
+line-length = 88
+target-version = ["py310"]
+
+[tool.ruff]
+line-length = 88
+select = ["E", "F", "I"]
