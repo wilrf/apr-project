@@ -56,10 +56,19 @@ def calculate_upset_target(df: pd.DataFrame) -> pd.DataFrame:
         axis=1
     )
 
+    # Identify favorite for each game (for matchup differentials)
+    df["favorite"] = df.apply(
+        lambda r: r["team_favorite_id"] if pd.notna(r["underdog"]) else None,
+        axis=1
+    )
+
     # Upset = 1 if underdog won
     df["upset"] = (df["underdog"] == df["winner"]).astype(int)
 
-    # Set NaN for excluded games (small spreads or ties)
+    # Set NaN for excluded games (small spreads)
     df.loc[df["underdog"].isna(), "upset"] = None
+
+    # Set NaN for tie games (winner is None but underdog exists)
+    df.loc[df["winner"].isna() & df["underdog"].notna(), "upset"] = None
 
     return df

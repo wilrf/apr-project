@@ -122,4 +122,10 @@ def load_betting_data(
         lambda x: normalize_team_abbr(TEAM_NAME_TO_ABBR.get(x, x))
     )
 
+    # Also normalize team_favorite_id for underdog identification
+    if "team_favorite_id" in df.columns:
+        df["team_favorite_id"] = df["team_favorite_id"].apply(
+            lambda x: normalize_team_abbr(TEAM_NAME_TO_ABBR.get(x, x)) if pd.notna(x) else x
+        )
+
     return df
