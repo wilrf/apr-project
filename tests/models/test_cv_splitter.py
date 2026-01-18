@@ -8,7 +8,7 @@ class TestTimeSeriesCVSplitter:
     @pytest.fixture
     def sample_data(self):
         """Sample data spanning multiple seasons."""
-        seasons = list(range(2018, 2024))  # 2018-2023
+        seasons = list(range(2016, 2023))  # 2016-2022 (7 seasons for 6-fold CV)
         games_per_season = 10
         return pd.DataFrame({
             "game_id": [f"g{i}" for i in range(len(seasons) * games_per_season)],
@@ -17,9 +17,9 @@ class TestTimeSeriesCVSplitter:
 
     def test_splitter_creates_correct_number_of_folds(self, sample_data):
         """Test that splitter creates expected number of folds."""
-        splitter = TimeSeriesCVSplitter(n_folds=5)
+        splitter = TimeSeriesCVSplitter(n_folds=6)
         folds = list(splitter.split(sample_data))
-        assert len(folds) == 5
+        assert len(folds) == 6
 
     def test_train_always_before_val(self, sample_data):
         """Test that training seasons always precede validation."""
@@ -53,6 +53,6 @@ class TestTimeSeriesCVSplitter:
             "game_id": ["g1", "g2"],
             "season": [2022, 2023],
         })
-        splitter = TimeSeriesCVSplitter(n_folds=5)
+        splitter = TimeSeriesCVSplitter(n_folds=6)
         with pytest.raises(ValueError):
             list(splitter.split(df))

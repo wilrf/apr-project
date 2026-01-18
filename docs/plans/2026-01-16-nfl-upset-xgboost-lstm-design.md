@@ -53,11 +53,10 @@ Research project comparing XGBoost and LSTM models for predicting NFL moneyline 
 5. Log unmatched/duplicate rows to `data/merge_audit.csv` and exclude unresolved games from modeling; track the drop rate.
 
 ### Time Range
-- **Training**: 2005-2023 regular seasons (~19 seasons, ~4,800 games)
-- **Validation**: 2024 regular season
-- **Test**: 2025 regular season (current season)
+- **Training**: 2005-2022 regular seasons (~18 seasons, ~4,608 games)
+- **Test**: 2023, 2024, 2025 regular seasons (3 seasons, ~816 games)
 
-**Note**: Regular season games only - excludes playoffs.
+**Note**: Regular season games only - excludes playoffs. See `docs/data-split-change.md` for rationale on 3-season test set.
 
 ## Feature Engineering
 
@@ -333,14 +332,15 @@ nfl-upset-prediction/
 Unlike regular cross-validation where you randomly split data, we must respect time order (can't use 2020 games to predict 2019).
 
 ```
-Fold 1: Train on 2005-2018 → Validate on 2019
-Fold 2: Train on 2005-2019 → Validate on 2020
-Fold 3: Train on 2005-2020 → Validate on 2021
-Fold 4: Train on 2005-2021 → Validate on 2022
-Fold 5: Train on 2005-2022 → Validate on 2023
+Fold 1: Train on 2005-2016 → Validate on 2017
+Fold 2: Train on 2005-2017 → Validate on 2018
+Fold 3: Train on 2005-2018 → Validate on 2019
+Fold 4: Train on 2005-2019 → Validate on 2020
+Fold 5: Train on 2005-2020 → Validate on 2021
+Fold 6: Train on 2005-2021 → Validate on 2022
 ```
 
-**Final model**: Train on all 2005-2023 data with best hyperparameters, then evaluate on 2024 (validation) and 2025 (test).
+**Final model**: Train on all 2005-2022 data with best hyperparameters, then evaluate separately on 2023, 2024, and 2025 (test).
 
 **Why this matters**: This prevents "peeking" at future data and gives realistic performance estimates.
 

@@ -30,7 +30,7 @@ class ModelTrainer:
     def __init__(
         self,
         model: Model,
-        n_folds: int = 5,
+        n_folds: int = 6,
     ):
         """
         Initialize trainer.

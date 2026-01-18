@@ -15,15 +15,16 @@ class TimeSeriesCVSplitter:
     - Training: All seasons up to validation year
     - Validation: Single season
 
-    Example with n_folds=5 and data from 2005-2023:
-        Fold 1: Train 2005-2018, Val 2019
-        Fold 2: Train 2005-2019, Val 2020
-        Fold 3: Train 2005-2020, Val 2021
-        Fold 4: Train 2005-2021, Val 2022
-        Fold 5: Train 2005-2022, Val 2023
+    Example with n_folds=6 and data from 2005-2022:
+        Fold 1: Train 2005-2016, Val 2017
+        Fold 2: Train 2005-2017, Val 2018
+        Fold 3: Train 2005-2018, Val 2019
+        Fold 4: Train 2005-2019, Val 2020
+        Fold 5: Train 2005-2020, Val 2021
+        Fold 6: Train 2005-2021, Val 2022
     """
 
-    def __init__(self, n_folds: int = 5):
+    def __init__(self, n_folds: int = 6):
         """
         Initialize splitter.
 

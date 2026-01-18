@@ -102,8 +102,9 @@ def _write_data_readme(
 
 
 if __name__ == "__main__":
-    # Run verification for target seasons
-    seasons = list(range(2005, 2024))
+    # Run verification for all seasons (training + test)
+    # Training: 2005-2022, Test: 2023-2025
+    seasons = list(range(2005, 2026))  # 2005-2025
     results = verify_data_coverage(seasons)
 
     print("\n=== Coverage Summary ===")

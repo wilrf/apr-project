@@ -1428,7 +1428,7 @@ class TestTimeSeriesCVSplitter:
     @pytest.fixture
     def sample_data(self):
         """Sample data spanning multiple seasons."""
-        seasons = list(range(2018, 2024))  # 2018-2023
+        seasons = list(range(2016, 2023))  # 2016-2022 (7 seasons for 6-fold CV)
         games_per_season = 10
         return pd.DataFrame({
             "game_id": [f"g{i}" for i in range(len(seasons) * games_per_season)],
@@ -1437,9 +1437,9 @@ class TestTimeSeriesCVSplitter:
 
     def test_splitter_creates_correct_number_of_folds(self, sample_data):
         """Test that splitter creates expected number of folds."""
-        splitter = TimeSeriesCVSplitter(n_folds=5)
+        splitter = TimeSeriesCVSplitter(n_folds=6)
         folds = list(splitter.split(sample_data))
-        assert len(folds) == 5
+        assert len(folds) == 6
 
     def test_train_always_before_val(self, sample_data):
         """Test that training seasons always precede validation."""
@@ -1492,15 +1492,16 @@ class TimeSeriesCVSplitter:
     - Training: All seasons up to validation year
     - Validation: Single season
 
-    Example with n_folds=5 and data from 2005-2023:
-        Fold 1: Train 2005-2018, Val 2019
-        Fold 2: Train 2005-2019, Val 2020
-        Fold 3: Train 2005-2020, Val 2021
-        Fold 4: Train 2005-2021, Val 2022
-        Fold 5: Train 2005-2022, Val 2023
+    Example with n_folds=6 and data from 2005-2022:
+        Fold 1: Train 2005-2016, Val 2017
+        Fold 2: Train 2005-2017, Val 2018
+        Fold 3: Train 2005-2018, Val 2019
+        Fold 4: Train 2005-2019, Val 2020
+        Fold 5: Train 2005-2020, Val 2021
+        Fold 6: Train 2005-2021, Val 2022
     """
 
-    def __init__(self, n_folds: int = 5):
+    def __init__(self, n_folds: int = 6):
         """
         Initialize splitter.
 
@@ -2154,7 +2155,7 @@ class ModelTrainer:
     def __init__(
         self,
         model: Model,
-        n_folds: int = 5,
+        n_folds: int = 6,
     ):
         """
         Initialize trainer.

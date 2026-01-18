@@ -24,7 +24,7 @@
 ### Data Strategy
 - Clear data verification step BEFORE committing to date range - shows risk awareness
 - Multiple data sources for cross-validation
-- Train/val/test split respects temporal ordering (2005-2023/2024/2025)
+- Train/test split respects temporal ordering (2005-2022 train / 2023-2025 test)
 - "Regular season only" explicitly stated - avoids playoff variance
 
 ### Feature Engineering
@@ -123,10 +123,10 @@
 - ROI > 5% after 10% vig: Most professional bettors achieve 2-3%
 - Consider: What if results show AUC = 0.53? Is that "failure"?
 
-#### 10. SINGLE TEST SPLIT RISK
-- Final eval uses single 2024 val / 2025 test split
-- Results may be specific to those years (what if unusual season?)
-- Consider multi-year holdout or rolling origin evaluation
+#### 10. ~~SINGLE TEST SPLIT RISK~~ (RESOLVED)
+- ~~Final eval uses single 2024 val / 2025 test split~~
+- **Update:** Now using 3-season test set (2023, 2024, 2025) for statistical robustness
+- Allows year-over-year analysis and confidence intervals
 
 #### 11. TRAINING INFRASTRUCTURE UNSPECIFIED
 - Batching strategy for LSTM?
@@ -160,7 +160,7 @@
 | Siamese LSTM architecture | Shared encoder for teams | ✅ Good - appropriate for comparison |
 | Time-series CV | Respects temporal order | ✅ Good - prevents future leakage |
 | PyTorch for LSTM | Captum compatibility | ⚠️ More boilerplate than TensorFlow |
-| Train 2005-2023 | ~4800 games | ⚠️ EPA data starts 2006, may need adjustment |
+| Train 2005-2022 | ~4608 games | ⚠️ EPA data starts 2006, may need adjustment |
 
 ---
 
@@ -178,7 +178,7 @@
 
 ### For Research Validity:
 7. **Lower success criteria expectations** or frame as exploration
-8. **Consider multi-year test evaluation** to reduce year-specific risk
+8. ~~**Consider multi-year test evaluation** to reduce year-specific risk~~ ✅ DONE - Now using 2023-2025 (3 seasons)
 
 ---
 
