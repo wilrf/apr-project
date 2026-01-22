@@ -1,66 +1,40 @@
 """Report generation utilities for model comparison."""
 
 from __future__ import annotations
-
 import numpy as np
 from typing import Dict, Any, Optional
 from pathlib import Path
 from datetime import datetime
 
 
-class ReportGenerator:
-    """
-    Generate comparison reports for model evaluation.
+def _fmt(v, precision=4):
+    """Format metric value."""
+    return f"{v:.{precision}f}" if isinstance(v, (int, float)) else "N/A"
 
-    Creates structured summaries and exports to various formats.
-    """
+
+class ReportGenerator:
+    """Generate comparison reports for model evaluation."""
 
     def __init__(self, model_results: Dict[str, Dict[str, Any]]):
-        """
-        Initialize report generator.
-
-        Args:
-            model_results: Dictionary mapping model names to their results.
-                          Each result should have 'y_true', 'y_pred', and 'metrics'.
-        """
         self.model_results = model_results
         self.model_names = list(model_results.keys())
         self._summary = None
 
     def generate_summary(self) -> Dict[str, Any]:
-        """
-        Generate a comprehensive summary of all model results.
-
-        Returns:
-            Dictionary containing model summaries and comparisons
-        """
-        if self._summary is not None:
+        """Generate comprehensive summary of all model results."""
+        if self._summary:
             return self._summary
 
-        summary = {
-            "generated_at": datetime.now().isoformat(),
-            "models": {},
-            "comparison": {},
-        }
+        summary = {"generated_at": datetime.now().isoformat(), "models": {}, "comparison": {}}
 
-        # Individual model summaries
         for name, result in self.model_results.items():
-            summary["models"][name] = {
-                "metrics": result.get("metrics", {}),
-                "n_samples": len(result.get("y_true", [])),
-            }
-
-            # Add prediction statistics if available
+            model_summary = {"metrics": result.get("metrics", {}), "n_samples": len(result.get("y_true", []))}
             if "y_pred" in result:
-                y_pred = np.array(result["y_pred"])
-                summary["models"][name]["prediction_stats"] = {
-                    "mean": float(y_pred.mean()),
-                    "std": float(y_pred.std()),
-                    "min": float(y_pred.min()),
-                    "max": float(y_pred.max()),
-                }
+                y = np.array(result["y_pred"])
+                model_summary["prediction_stats"] = {"mean": float(y.mean()), "std": float(y.std()),
+                                                     "min": float(y.min()), "max": float(y.max())}
+            summary["models"][name] = model_summary
 
-        # Model comparisons (if multiple models)
         if len(self.model_names) >= 2:
             summary["comparison"] = self._generate_comparison()
 
@@ -69,171 +43,73 @@ class ReportGenerator:
 
     def _generate_comparison(self) -> Dict[str, Any]:
         """Generate pairwise model comparisons."""
-        comparison = {
-            "metric_rankings": {},
-            "pairwise": {},
-        }
+        comparison = {"metric_rankings": {}, "pairwise": {}}
+        all_metrics = set(m for r in self.model_results.values() for m in r.get("metrics", {}))
+        higher_is_better = {"auc_roc", "accuracy", "roi"}
 
-        # Collect all metrics
-        all_metrics = set()
-        for result in self.model_results.values():
-            all_metrics.update(result.get("metrics", {}).keys())
-
-        # Rank models by each metric
         for metric in all_metrics:
-            scores = []
-            for name, result in self.model_results.items():
-                if metric in result.get("metrics", {}):
-                    scores.append((name, result["metrics"][metric]))
+            scores = [(n, r["metrics"][metric]) for n, r in self.model_results.items() if metric in r.get("metrics", {})]
+            scores.sort(key=lambda x: x[1], reverse=(metric in higher_is_better))
+            comparison["metric_rankings"][metric] = [{"model": n, "value": v} for n, v in scores]
 
-            # Sort: higher is better for AUC, lower for Brier/loss
-            reverse = metric in ["auc_roc", "accuracy", "roi"]
-            scores.sort(key=lambda x: x[1], reverse=reverse)
-
-            comparison["metric_rankings"][metric] = [
-                {"model": name, "value": value} for name, value in scores
-            ]
-
-        # Pairwise prediction correlations
         if len(self.model_names) == 2:
-            m1, m2 = self.model_names
-            if "y_pred" in self.model_results[m1] and "y_pred" in self.model_results[m2]:
-                pred1 = np.array(self.model_results[m1]["y_pred"])
-                pred2 = np.array(self.model_results[m2]["y_pred"])
-
-                if len(pred1) == len(pred2):
-                    comparison["pairwise"]["prediction_correlation"] = float(
-                        np.corrcoef(pred1, pred2)[0, 1]
-                    )
-
-                    # Agreement rate at threshold 0.5
-                    agree = (pred1 >= 0.5) == (pred2 >= 0.5)
-                    comparison["pairwise"]["agreement_rate"] = float(agree.mean())
+            r1, r2 = [self.model_results[m] for m in self.model_names]
+            if "y_pred" in r1 and "y_pred" in r2:
+                p1, p2 = np.array(r1["y_pred"]), np.array(r2["y_pred"])
+                if len(p1) == len(p2):
+                    comparison["pairwise"]["prediction_correlation"] = float(np.corrcoef(p1, p2)[0, 1])
+                    comparison["pairwise"]["agreement_rate"] = float(((p1 >= 0.5) == (p2 >= 0.5)).mean())
 
         return comparison
 
-    def export_markdown(
-        self,
-        output_path: Path,
-        title: str = "NFL Upset Prediction: Model Comparison Report",
-    ) -> None:
-        """
-        Export report as a markdown file.
+    def export_markdown(self, output_path: Path, title: str = "NFL Upset Prediction: Model Comparison Report") -> None:
+        """Export report as markdown file."""
+        s = self.generate_summary()
+        lines = [f"# {title}", "", f"*Generated: {s['generated_at']}*", "", "## Model Performance Summary", "",
+                 "| Model | AUC-ROC | Brier Score | Accuracy | Samples |", "|-------|---------|-------------|----------|---------|"]
 
-        Args:
-            output_path: Path to write the markdown file
-            title: Title for the report
-        """
-        summary = self.generate_summary()
-        output_path = Path(output_path)
-
-        lines = [
-            f"# {title}",
-            "",
-            f"*Generated: {summary['generated_at']}*",
-            "",
-            "## Model Performance Summary",
-            "",
-        ]
-
-        # Model metrics table
-        lines.append("| Model | AUC-ROC | Brier Score | Accuracy | Samples |")
-        lines.append("|-------|---------|-------------|----------|---------|")
-
-        for name, data in summary["models"].items():
-            metrics = data["metrics"]
-            auc = metrics.get("auc_roc", "N/A")
-            brier = metrics.get("brier_score", "N/A")
-            acc = metrics.get("accuracy", "N/A")
-            n = data["n_samples"]
-
-            auc_str = f"{auc:.4f}" if isinstance(auc, (int, float)) else auc
-            brier_str = f"{brier:.4f}" if isinstance(brier, (int, float)) else brier
-            acc_str = f"{acc:.4f}" if isinstance(acc, (int, float)) else acc
-
-            lines.append(f"| {name} | {auc_str} | {brier_str} | {acc_str} | {n:,} |")
-
+        for name, data in s["models"].items():
+            m = data["metrics"]
+            lines.append(f"| {name} | {_fmt(m.get('auc_roc'))} | {_fmt(m.get('brier_score'))} | "
+                        f"{_fmt(m.get('accuracy'))} | {data['n_samples']:,} |")
         lines.append("")
 
-        # Comparison section
-        if summary["comparison"]:
-            lines.append("## Model Comparison")
-            lines.append("")
-
-            # Rankings
-            if summary["comparison"].get("metric_rankings"):
-                lines.append("### Metric Rankings")
-                lines.append("")
-
-                for metric, rankings in summary["comparison"]["metric_rankings"].items():
+        if s["comparison"]:
+            lines.extend(["## Model Comparison", ""])
+            if s["comparison"].get("metric_rankings"):
+                lines.extend(["### Metric Rankings", ""])
+                for metric, rankings in s["comparison"]["metric_rankings"].items():
                     lines.append(f"**{metric}:**")
-                    for i, rank in enumerate(rankings, 1):
-                        lines.append(f"  {i}. {rank['model']}: {rank['value']:.4f}")
+                    lines.extend(f"  {i}. {r['model']}: {r['value']:.4f}" for i, r in enumerate(rankings, 1))
                     lines.append("")
 
-            # Pairwise
-            if summary["comparison"].get("pairwise"):
-                lines.append("### Pairwise Analysis")
-                lines.append("")
-                pairwise = summary["comparison"]["pairwise"]
-
-                if "prediction_correlation" in pairwise:
-                    lines.append(
-                        f"- Prediction Correlation: {pairwise['prediction_correlation']:.3f}"
-                    )
-                if "agreement_rate" in pairwise:
-                    lines.append(
-                        f"- Classification Agreement: {pairwise['agreement_rate']:.1%}"
-                    )
+            if s["comparison"].get("pairwise"):
+                lines.extend(["### Pairwise Analysis", ""])
+                pw = s["comparison"]["pairwise"]
+                if "prediction_correlation" in pw:
+                    lines.append(f"- Prediction Correlation: {pw['prediction_correlation']:.3f}")
+                if "agreement_rate" in pw:
+                    lines.append(f"- Classification Agreement: {pw['agreement_rate']:.1%}")
                 lines.append("")
 
-        # Individual model details
-        lines.append("## Model Details")
-        lines.append("")
-
-        for name, data in summary["models"].items():
-            lines.append(f"### {name}")
-            lines.append("")
-
+        lines.extend(["## Model Details", ""])
+        for name, data in s["models"].items():
+            lines.extend([f"### {name}", ""])
             if "prediction_stats" in data:
-                stats = data["prediction_stats"]
-                lines.append("**Prediction Distribution:**")
-                lines.append(f"- Mean: {stats['mean']:.3f}")
-                lines.append(f"- Std: {stats['std']:.3f}")
-                lines.append(f"- Range: [{stats['min']:.3f}, {stats['max']:.3f}]")
-                lines.append("")
+                st = data["prediction_stats"]
+                lines.extend(["**Prediction Distribution:**", f"- Mean: {st['mean']:.3f}",
+                             f"- Std: {st['std']:.3f}", f"- Range: [{st['min']:.3f}, {st['max']:.3f}]", ""])
 
-        # Write file
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text("\n".join(lines))
+        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+        Path(output_path).write_text("\n".join(lines))
 
     def export_dict(self) -> Dict[str, Any]:
-        """
-        Export report as a dictionary.
-
-        Returns:
-            Complete report as a dictionary
-        """
         return self.generate_summary()
 
 
-def generate_report(
-    model_results: Dict[str, Dict[str, Any]],
-    output_path: Optional[Path] = None,
-) -> Dict[str, Any]:
-    """
-    Convenience function to generate a report.
-
-    Args:
-        model_results: Model results dictionary
-        output_path: Optional path to export markdown report
-
-    Returns:
-        Report summary dictionary
-    """
-    generator = ReportGenerator(model_results)
-
+def generate_report(model_results: Dict[str, Dict[str, Any]], output_path: Optional[Path] = None) -> Dict[str, Any]:
+    """Convenience function to generate a report."""
+    gen = ReportGenerator(model_results)
     if output_path:
-        generator.export_markdown(output_path)
-
-    return generator.generate_summary()
+        gen.export_markdown(output_path)
+    return gen.generate_summary()

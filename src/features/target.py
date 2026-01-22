@@ -53,18 +53,15 @@ def calculate_upset_target(df: pd.DataFrame) -> pd.DataFrame:
     # Identify underdog for each game
     df["underdog"] = df.apply(identify_underdog, axis=1)
 
-    # Calculate winner
-    df["winner"] = df.apply(
-        lambda r: r["home_team"] if r["home_score"] > r["away_score"]
-        else (r["away_team"] if r["away_score"] > r["home_score"] else None),
-        axis=1
-    )
+    # Calculate winner using vectorized operations
+    df["winner"] = None
+    home_wins = df["home_score"] > df["away_score"]
+    away_wins = df["away_score"] > df["home_score"]
+    df.loc[home_wins, "winner"] = df.loc[home_wins, "home_team"]
+    df.loc[away_wins, "winner"] = df.loc[away_wins, "away_team"]
 
     # Identify favorite for each game (for matchup differentials)
-    df["favorite"] = df.apply(
-        lambda r: r["team_favorite_id"] if pd.notna(r["underdog"]) else None,
-        axis=1
-    )
+    df["favorite"] = df["team_favorite_id"].where(df["underdog"].notna())
 
     # Upset = 1 if underdog won
     df["upset"] = (df["underdog"] == df["winner"]).astype(int)
