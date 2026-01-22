@@ -342,7 +342,14 @@ class FeatureEngineeringPipeline:
         if self.exclude_week_1:
             result = result[result["week"] > 1].copy()
 
-        # Step 8: Fill any remaining NaNs in feature columns
+        # Step 8: Exclude edge cases (spread >= 3 but no rolling stats)
+        # These are ~5 games where teams have no prior history (relocation, hurricane postponement, etc.)
+        has_spread = result["spread_magnitude"] >= 3
+        has_rolling = (result["underdog_points_scored_roll5"].notna() &
+                       (result["underdog_points_scored_roll5"] != 0))
+        result = result[~has_spread | has_rolling].copy()
+
+        # Step 9: Fill any remaining NaNs in feature columns
         for col in self.get_feature_columns():
             if col in result.columns:
                 result[col] = result[col].fillna(0)
