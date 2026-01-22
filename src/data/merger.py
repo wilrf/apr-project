@@ -6,6 +6,15 @@ import pandas as pd
 from pathlib import Path
 from typing import TypedDict, Tuple
 
+from src.data.betting_loader import TEAM_ABBR_MAP
+
+
+def normalize_team_abbr(abbr: str) -> str:
+    """Normalize team abbreviation to current franchise name."""
+    if pd.isna(abbr):
+        return abbr
+    return TEAM_ABBR_MAP.get(abbr, abbr)
+
 
 class MergeAudit(TypedDict):
     """Audit information from data merge."""
@@ -32,7 +41,14 @@ def merge_nfl_betting_data(
         Tuple of (merged DataFrame, audit dictionary)
     """
     # Make copies to avoid modifying originals
+    nfl_df = nfl_df.copy()
     betting_df = betting_df.copy()
+
+    # Normalize NFL team abbreviations to match betting data (handles relocations)
+    # STL -> LA, SD -> LAC, OAK -> LV, etc.
+    for col in ["home_team", "away_team"]:
+        if col in nfl_df.columns:
+            nfl_df[col] = nfl_df[col].apply(normalize_team_abbr)
 
     # Standardize betting columns for merge
     betting_df = betting_df.rename(columns={
