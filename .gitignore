@@ -34,11 +34,9 @@ ENV/
 *.swp
 *.swo
 
-# Data files (large files shouldn't be in git)
+# Data files (large, regenerated)
 data/raw/
-data/processed/
-data/splits/
-*.csv
+data/features/
 *.parquet
 *.pkl
 
