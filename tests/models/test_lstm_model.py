@@ -1,40 +1,65 @@
 # tests/models/test_lstm_model.py
+"""Tests for Siamese LSTM model."""
 import pytest
 import torch
 import numpy as np
-from src.models.lstm_model import UpsetLSTM, LSTMDataset
+from src.models.lstm_model import SiameseUpsetLSTM, SiameseLSTMDataset
 
 
-class TestLSTMDataset:
+class TestSiameseLSTMDataset:
     def test_dataset_length(self):
         """Test dataset returns correct length."""
-        sequences = np.random.randn(100, 5, 15)  # 100 games, 5 timesteps, 15 features
-        matchup = np.random.randn(100, 10)  # 10 matchup features
-        targets = np.random.randint(0, 2, 100)
+        n_samples = 100
+        seq_len = 5
+        n_features = 4
+        n_matchup = 10
 
-        dataset = LSTMDataset(sequences, matchup, targets)
-        assert len(dataset) == 100
+        und_seq = np.random.randn(n_samples, seq_len, n_features)
+        fav_seq = np.random.randn(n_samples, seq_len, n_features)
+        matchup = np.random.randn(n_samples, n_matchup)
+        targets = np.random.randint(0, 2, n_samples).astype(float)
+
+        dataset = SiameseLSTMDataset(und_seq, fav_seq, matchup, targets)
+        assert len(dataset) == n_samples
 
     def test_dataset_returns_tensors(self):
         """Test dataset returns torch tensors."""
-        sequences = np.random.randn(10, 5, 15)
+        und_seq = np.random.randn(10, 5, 4)
+        fav_seq = np.random.randn(10, 5, 4)
         matchup = np.random.randn(10, 10)
-        targets = np.random.randint(0, 2, 10)
+        targets = np.random.randint(0, 2, 10).astype(float)
 
-        dataset = LSTMDataset(sequences, matchup, targets)
-        seq, match, target = dataset[0]
+        dataset = SiameseLSTMDataset(und_seq, fav_seq, matchup, targets)
+        result = dataset[0]
 
-        assert isinstance(seq, torch.Tensor)
-        assert isinstance(match, torch.Tensor)
-        assert isinstance(target, torch.Tensor)
+        # Should return 6 items: und_seq, fav_seq, matchup, target, und_mask, fav_mask
+        assert len(result) == 6
+        for item in result:
+            assert isinstance(item, torch.Tensor)
+
+    def test_dataset_with_masks(self):
+        """Test dataset handles masks correctly."""
+        und_seq = np.random.randn(10, 5, 4)
+        fav_seq = np.random.randn(10, 5, 4)
+        matchup = np.random.randn(10, 10)
+        targets = np.random.randint(0, 2, 10).astype(float)
+        und_mask = np.ones((10, 5))
+        fav_mask = np.ones((10, 5))
+
+        dataset = SiameseLSTMDataset(
+            und_seq, fav_seq, matchup, targets, und_mask, fav_mask
+        )
+        result = dataset[0]
+
+        assert len(result) == 6
 
 
-class TestUpsetLSTM:
+class TestSiameseUpsetLSTM:
     @pytest.fixture
     def model(self):
         """Create model instance."""
-        return UpsetLSTM(
-            sequence_features=15,
+        return SiameseUpsetLSTM(
+            sequence_features=4,
             matchup_features=10,
             hidden_size=64,
             num_layers=2,
@@ -43,37 +68,91 @@ class TestUpsetLSTM:
     def test_forward_returns_probabilities(self, model):
         """Test forward pass returns values between 0 and 1."""
         batch_size = 8
-        seq = torch.randn(batch_size, 5, 15)
-        matchup = torch.randn(batch_size, 10)
+        seq_len = 5
+        n_features = 4
+        n_matchup = 10
 
-        output = model(seq, matchup)
+        und_seq = torch.randn(batch_size, seq_len, n_features)
+        fav_seq = torch.randn(batch_size, seq_len, n_features)
+        matchup = torch.randn(batch_size, n_matchup)
+
+        output = model(und_seq, fav_seq, matchup)
 
         assert output.shape == (batch_size, 1)
         assert all(0 <= p <= 1 for p in output.squeeze())
 
+    def test_siamese_uses_shared_encoder(self, model):
+        """Test that the same encoder is used for both teams."""
+        # The model should have a single shared_lstm, not two separate ones
+        assert hasattr(model, "shared_lstm")
+        assert isinstance(model.shared_lstm, torch.nn.LSTM)
+
     def test_model_handles_masking(self, model):
         """Test model handles padded sequences with mask."""
         batch_size = 4
-        seq = torch.randn(batch_size, 5, 15)
-        matchup = torch.randn(batch_size, 10)
-        # Mask: first 2 samples have full sequences, last 2 have only 3 games
-        mask = torch.tensor([
+        seq_len = 5
+        n_features = 4
+        n_matchup = 10
+
+        und_seq = torch.randn(batch_size, seq_len, n_features)
+        fav_seq = torch.randn(batch_size, seq_len, n_features)
+        matchup = torch.randn(batch_size, n_matchup)
+
+        # Masks: first 2 have full sequences, last 2 have only 3 games
+        und_mask = torch.tensor([
             [1, 1, 1, 1, 1],
             [1, 1, 1, 1, 1],
-            [1, 1, 1, 0, 0],
-            [1, 1, 1, 0, 0],
+            [0, 0, 1, 1, 1],
+            [0, 0, 1, 1, 1],
+        ]).float()
+        fav_mask = torch.tensor([
+            [1, 1, 1, 1, 1],
+            [0, 1, 1, 1, 1],
+            [1, 1, 1, 1, 1],
+            [0, 0, 0, 1, 1],
         ]).float()
 
-        output = model(seq, matchup, mask=mask)
+        output = model(und_seq, fav_seq, matchup, und_mask, fav_mask)
         assert output.shape == (batch_size, 1)
 
     def test_attention_weights_sum_to_one(self, model):
-        """Test that attention weights sum to approximately 1."""
+        """Test that attention weights sum to approximately 1 for each team."""
         batch_size = 4
-        seq = torch.randn(batch_size, 5, 15)
+        seq_len = 5
+        n_features = 4
 
-        weights = model.get_attention_weights(seq)
+        und_seq = torch.randn(batch_size, seq_len, n_features)
+        fav_seq = torch.randn(batch_size, seq_len, n_features)
+
+        und_weights, fav_weights = model.get_attention_weights(und_seq, fav_seq)
 
         # Each sample's weights should sum to ~1
         for i in range(batch_size):
-            assert abs(weights[i].sum().item() - 1.0) < 0.01
+            assert abs(und_weights[i].sum().item() - 1.0) < 0.01
+            assert abs(fav_weights[i].sum().item() - 1.0) < 0.01
+
+    def test_attention_weights_with_mask(self, model):
+        """Test attention weights respect masking."""
+        batch_size = 2
+        seq_len = 5
+        n_features = 4
+
+        und_seq = torch.randn(batch_size, seq_len, n_features)
+        fav_seq = torch.randn(batch_size, seq_len, n_features)
+
+        # Mask out first 3 positions for underdog
+        und_mask = torch.tensor([
+            [0, 0, 0, 1, 1],
+            [0, 0, 0, 1, 1],
+        ]).float()
+        fav_mask = torch.ones(batch_size, seq_len)
+
+        und_weights, fav_weights = model.get_attention_weights(
+            und_seq, fav_seq, und_mask, fav_mask
+        )
+
+        # Masked positions should have ~0 attention
+        for i in range(batch_size):
+            assert und_weights[i, :3].sum().item() < 0.01
+            # Valid positions should have non-zero attention
+            assert und_weights[i, 3:].sum().item() > 0.9
