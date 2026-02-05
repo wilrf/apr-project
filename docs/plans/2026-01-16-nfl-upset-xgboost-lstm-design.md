@@ -1,11 +1,16 @@
-# NFL Upset Prediction: XGBoost vs LSTM Comparison
+# NFL Upset Prediction: Multi-Model Diagnostic Framework
 
-**Date:** 2026-01-16
-**Status:** Design Complete (v4 - logic gaps fixed)
+**Date:** 2026-01-16 (Updated: 2026-02-05)
+**Status:** Design Complete (v5 - research pivot to multi-model diagnostics)
 
 ## Overview
 
-Research project comparing XGBoost and LSTM models for predicting NFL moneyline upsets, with focus on understanding the structural factors that drive upset predictions and comparing how each model reasons about the problem.
+Research project using Logistic Regression, XGBoost, and LSTM models as **diagnostic tools** to understand the underlying mechanisms of NFL upsets. Each model architecture captures different structural aspects:
+- **LR**: Spread mispricing (linear market inefficiencies)
+- **XGBoost**: Feature interactions (non-linear patterns)
+- **LSTM**: Temporal dynamics (momentum, fatigue, sequences)
+
+See `docs/plans/2026-02-05-research-pivot.md` for detailed rationale.
 
 ## Problem Definition
 
@@ -14,9 +19,10 @@ Research project comparing XGBoost and LSTM models for predicting NFL moneyline 
 - **Underdog definition**: Team with betting spread ≥ +3
 
 ### Research Questions
-1. Which structural factors most predict NFL upsets?
-2. Do XGBoost and LSTM rely on different signals? (Difference in reasoning between the two models)
-3. Are there profitable betting opportunities at high-confidence thresholds?
+1. What do the differing predictive structures of LR, XGBoost, and LSTM reveal about upset mechanisms?
+2. Which types of upsets are "predictable" vs "random"? (characterized by model agreement patterns)
+3. What does exclusive correct prediction by a single model reveal about that model's structural bias?
+4. Are there profitable betting opportunities when specific models (or ensembles) are confident?
 
 ## Data Strategy
 
@@ -134,22 +140,40 @@ Research project comparing XGBoost and LSTM models for predicting NFL moneyline 
 
 ## Model Architectures
 
-### XGBoost
-- **Input**: Flat feature vector per game (~50-80 features)
+### Logistic Regression (Baseline + Spread Mispricing Detector)
+- **Input**: Flat feature vector per game (~61 features), standardized
+- **Output**: Probability 0-1 (sigmoid)
+- **Regularization**: L1 (Lasso) with C=0.1 for sparse coefficients
+- **Strengths**: Highly interpretable, identifies linear market inefficiencies
+- **What it captures**: When the betting market systematically misprices certain linear feature combinations
+
+```
+Standardized Features → Logistic Regression → P(upset)
+[61 features]                                  [0.0 - 1.0]
+```
+
+**Best Config (from experiments):** `C=0.1, penalty='l1', solver='saga'`
+
+### XGBoost (Interaction Detector)
+- **Input**: Flat feature vector per game (~61 features)
 - **Output**: Probability 0-1 (logistic objective)
-- **Strengths**: Handles tabular data well, fast training, highly interpretable
+- **Strengths**: Captures non-linear interactions, handles feature interactions automatically
+- **What it captures**: Non-linear combinations of features that create upset conditions
 - **Hyperparameters**: max_depth, learning_rate, n_estimators, min_child_weight
 
 ```
 Game Features → XGBoost → P(upset)
-[80 features]              [0.0 - 1.0]
+[61 features]              [0.0 - 1.0]
 ```
 
-### LSTM
+**Best Config (from experiments):** `max_depth=1, learning_rate=0.01, n_estimators=500`
+
+### LSTM (Temporal Pattern Detector)
 - **Framework**: PyTorch (for Captum interpretability compatibility)
-- **Input**: Sequence of last 5 games for each team
+- **Input**: Sequence of last 5 games for each team (siamese architecture)
 - **Output**: Probability 0-1 (sigmoid activation)
-- **Strengths**: Learns temporal patterns automatically, captures momentum
+- **Strengths**: Learns temporal patterns automatically, captures momentum shifts
+- **What it captures**: Momentum, fatigue patterns, and sequential dynamics invisible to static models
 
 **Architecture Details:**
 ```
@@ -190,9 +214,18 @@ Team B last 5 games → LSTM Encoder (shared weights) →
 - **Example**: Week 2 team has 1 prior game → [Game1, 0, 0, 0, 0] with mask [1, 0, 0, 0, 0]
 - **Minimum requirement**: Team must have at least 1 prior game to be included (Week 1 excluded from predictions)
 
-### Key Architectural Difference
-- **XGBoost**: You engineer the temporal features (rolling averages, trends)
-- **LSTM**: Model learns what temporal patterns matter from raw sequences
+### Key Architectural Differences
+- **LR**: Assumes linear relationship between features and log-odds of upset
+- **XGBoost**: Learns decision boundaries and feature interactions via boosted trees
+- **LSTM**: Learns temporal patterns from raw game sequences
+
+### Why Three Models?
+Each model acts as a diagnostic tool revealing different upset mechanisms:
+- If **only LR** is correct → spread mispricing (linear market blind spot)
+- If **only XGBoost** is correct → non-linear interaction drove the upset
+- If **only LSTM** is correct → temporal dynamics (momentum/fatigue) provided the signal
+- If **all wrong** → true randomness or factors outside model scope
+- If **all correct** → obvious upset with clear signal
 
 ## Evaluation Framework
 
@@ -217,11 +250,15 @@ Team B last 5 games → LSTM Encoder (shared weights) →
 | AUC-ROC | > 0.55 | Random guessing = 0.50. Vegas implied lines are ~0.52-0.54. Beating this shows we found signal. |
 | Calibration | Brier < baseline | Baseline = constant prediction at empirical upset rate r (Brier = r*(1-r)) |
 | Profitability | ROI > 5% | After accounting for the ~10% vig, need meaningful edge |
-| Model difference | Agreement < 85% | If models agree 95%+ they learned the same thing - less interesting |
+| Model disagreement | Agreement < 85% | If models agree 95%+ they learned the same thing - less interesting |
+| Category coverage | All 8 categories populated | Ensures disagreement analysis is meaningful |
+| Exclusive insights | ONLY_* categories have distinct profiles | Validates that models capture different signals |
 
 **Calibration baseline note:** Compute r from the training set upset rate. Example: r=0.35 => baseline Brier=0.2275, so target <0.2275.
 
 **What if models perform similarly to random?** That's still a valid research finding - it would suggest NFL upset markets are highly efficient.
+
+**What if models agree on everything?** This suggests they're learning the same underlying signal, which limits the diagnostic value of the multi-model approach but still provides ensemble confidence.
 
 ### Interpretability Analysis
 | Model | Method |
@@ -248,25 +285,34 @@ Team B last 5 games → LSTM Encoder (shared weights) →
 
 | Analysis | Method |
 |----------|--------|
-| Feature importance correlation | Spearman correlation between XGBoost SHAP and LSTM aggregated importance (see below) |
-| Prediction agreement rate | % of games where both models agree (same side of 0.5 threshold) |
-| Disagreement analysis | Deep dive into games where models disagree by >0.3 probability |
-| Confidence calibration | Compare calibration curves - do they over/underconfident in same situations? |
+| Feature importance correlation | Spearman correlation between XGBoost SHAP and LR coefficients |
+| Prediction agreement rate | % of games where all 3 models agree (same side of 0.5 threshold) |
+| Disagreement analysis | Categorize all games by which models were correct |
+| Confidence calibration | Compare calibration curves across all 3 models |
 
-**Making LSTM/XGBoost Importance Comparable:**
-- **Problem**: XGBoost SHAP gives per-feature importance, LSTM attention gives per-timestep importance
-- **Solution**: Aggregate LSTM attention by feature category
-  1. For each prediction, get attention weights per timestep [w1, w2, w3, w4, w5]
-  2. Multiply each timestep's features by its attention weight
-  3. Sum across timesteps to get "attention-weighted feature importance"
-  4. Average across all predictions for global comparison
-- **Result**: Both models now have per-feature importance scores that can be correlated
+### Disagreement Analysis Framework
+
+**Prediction Categories:**
+
+| Category | Interpretation |
+|----------|---------------|
+| ALL_CORRECT | Obvious upsets - clear signal all models detect |
+| ALL_WRONG | True randomness - no model captures |
+| ONLY_LR | Spread mispricing - linear market inefficiency |
+| ONLY_XGB | Interaction-driven - non-linear feature combinations |
+| ONLY_LSTM | Temporal signal - momentum/fatigue patterns (most interesting!) |
+| LR_XGB | Static models agree - non-temporal signal |
+| LR_LSTM | Linear + temporal agree |
+| XGB_LSTM | Non-linear + temporal agree |
+
+**Key Insight:** The ONLY_* categories are the most valuable for understanding each model's unique structural bias.
 
 **Disagreement Case Study Protocol:**
-1. Identify top 20 games with largest prediction disagreement
-2. For each: extract XGBoost SHAP explanation + LSTM attention weights
-3. Categorize disagreement type: momentum-driven? matchup-driven? situational?
-4. Document patterns in when each model is correct
+1. Categorize all games into the 8 prediction categories
+2. Profile each category: avg spread, upset rate, key feature distributions
+3. Deep dive into ONLY_LSTM games - what temporal patterns did it detect?
+4. Analyze ONLY_XGB games - which feature interactions drove predictions?
+5. Document insights for each category type
 
 ### Profitability Backtest
 
