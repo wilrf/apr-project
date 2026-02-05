@@ -14,6 +14,7 @@ from src.models.lstm_model import SiameseUpsetLSTM, SiameseLSTMDataset
 from src.models.sequence_builder import (
     build_siamese_sequences,
     SiameseLSTMData,
+    NormalizationStats,
     SEQUENCE_FEATURES,
     MATCHUP_FEATURES,
 )
@@ -80,6 +81,8 @@ class SiameseLSTMTrainer:
 
         self.cv_splitter = TimeSeriesCVSplitter(n_folds=n_folds)
         self.model: Optional[SiameseUpsetLSTM] = None
+        self._train_stats: Optional[NormalizationStats] = None
+        self._sequence_data: Optional[SiameseLSTMData] = None
 
     def _create_model(self) -> SiameseUpsetLSTM:
         """Create a new Siamese LSTM model instance."""
@@ -260,18 +263,36 @@ class SiameseLSTMTrainer:
         Returns:
             Dictionary with fold metrics and aggregated results
         """
-        # Build sequences from full dataset
-        sequence_data = build_siamese_sequences(df, normalize=True)
+        # Filter to valid games first
+        valid_df = df[df["upset"].notna()].copy()
 
         fold_metrics: List[Dict[str, Any]] = []
         fold_predictions: List[Dict[str, Any]] = []
 
         for fold_idx, (train_idx, val_idx) in enumerate(
-            self.cv_splitter.split(df[df["upset"].notna()])
+            self.cv_splitter.split(valid_df)
         ):
-            # Create data loaders
-            train_loader = self._create_dataloader(sequence_data, train_idx, shuffle=True)
-            val_loader = self._create_dataloader(sequence_data, val_idx, shuffle=False)
+            # Split data BEFORE building sequences to avoid leakage
+            train_df = valid_df.iloc[train_idx].copy()
+            val_df = valid_df.iloc[val_idx].copy()
+
+            # Build train sequences and compute stats from TRAIN data only
+            train_data, train_stats = build_siamese_sequences(
+                train_df, normalize=True, stats=None
+            )
+
+            # Build val sequences using TRAIN stats (no leakage)
+            val_data, _ = build_siamese_sequences(
+                val_df, normalize=True, stats=train_stats
+            )
+
+            # Create data loaders (indices are now 0 to len-1 for each split)
+            train_loader = self._create_dataloader(
+                train_data, np.arange(train_data.n_samples), shuffle=True
+            )
+            val_loader = self._create_dataloader(
+                val_data, np.arange(val_data.n_samples), shuffle=False
+            )
 
             # Create and train model
             model = self._create_model()
@@ -283,8 +304,8 @@ class SiameseLSTMTrainer:
             # Calculate metrics
             metrics = self._calculate_metrics(y_true, y_pred)
             metrics["fold"] = fold_idx
-            metrics["train_size"] = len(train_idx)
-            metrics["val_size"] = len(val_idx)
+            metrics["train_size"] = train_data.n_samples
+            metrics["val_size"] = val_data.n_samples
             metrics["epochs_trained"] = history["epochs_trained"]
 
             fold_metrics.append(metrics)
@@ -292,7 +313,7 @@ class SiameseLSTMTrainer:
                 "val_idx": val_idx,
                 "y_true": y_true,
                 "y_pred": y_pred,
-                "game_ids": sequence_data.game_ids[val_idx],
+                "game_ids": val_data.game_ids,
             })
 
         # Aggregate metrics
@@ -328,7 +349,10 @@ class SiameseLSTMTrainer:
         Returns:
             Self for chaining
         """
-        sequence_data = build_siamese_sequences(df, normalize=True)
+        # Build sequences and store training stats for later use in predict_proba
+        sequence_data, self._train_stats = build_siamese_sequences(
+            df, normalize=True, stats=None
+        )
 
         # Store for prediction
         self._sequence_data = sequence_data
@@ -363,8 +387,13 @@ class SiameseLSTMTrainer:
         """
         if self.model is None:
             raise ValueError("Model not trained. Call fit() first.")
+        if self._train_stats is None:
+            raise ValueError("Training stats not available. Call fit() first.")
 
-        sequence_data = build_siamese_sequences(df, normalize=True)
+        # Use TRAINING stats for normalization (no data leakage)
+        sequence_data, _ = build_siamese_sequences(
+            df, normalize=True, stats=self._train_stats
+        )
 
         loader = self._create_dataloader(
             sequence_data,
@@ -391,8 +420,13 @@ class SiameseLSTMTrainer:
         """
         if self.model is None:
             raise ValueError("Model not trained. Call fit() first.")
+        if self._train_stats is None:
+            raise ValueError("Training stats not available. Call fit() first.")
 
-        sequence_data = build_siamese_sequences(df, normalize=True)
+        # Use TRAINING stats for normalization (no data leakage)
+        sequence_data, _ = build_siamese_sequences(
+            df, normalize=True, stats=self._train_stats
+        )
 
         und_seq = torch.FloatTensor(sequence_data.underdog_sequences).to(self.device)
         fav_seq = torch.FloatTensor(sequence_data.favorite_sequences).to(self.device)

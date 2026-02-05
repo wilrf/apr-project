@@ -8,6 +8,7 @@ from src.models.sequence_builder import (
     _build_team_game_history,
     _get_team_sequence,
     SiameseLSTMData,
+    NormalizationStats,
     SEQUENCE_FEATURES,
     MATCHUP_FEATURES,
     SEQUENCE_LENGTH,
@@ -128,7 +129,7 @@ class TestGetTeamSequence:
 class TestBuildSiameseSequences:
     def test_returns_correct_structure(self, sample_game_data):
         """Test that build_siamese_sequences returns SiameseLSTMData."""
-        result = build_siamese_sequences(sample_game_data, normalize=False)
+        result, stats = build_siamese_sequences(sample_game_data, normalize=False)
 
         assert isinstance(result, SiameseLSTMData)
         assert hasattr(result, "underdog_sequences")
@@ -138,10 +139,12 @@ class TestBuildSiameseSequences:
         assert hasattr(result, "underdog_masks")
         assert hasattr(result, "favorite_masks")
         assert hasattr(result, "game_ids")
+        # No stats when normalize=False
+        assert stats is None
 
     def test_separate_sequences_for_each_team(self, sample_game_data):
         """Test that underdog and favorite have separate sequences."""
-        result = build_siamese_sequences(sample_game_data, normalize=False)
+        result, _ = build_siamese_sequences(sample_game_data, normalize=False)
 
         n_samples = len(sample_game_data[sample_game_data["upset"].notna()])
         n_features = len(SEQUENCE_FEATURES)
@@ -155,7 +158,7 @@ class TestBuildSiameseSequences:
 
     def test_matchup_features_shape(self, sample_game_data):
         """Test that matchup features have correct shape."""
-        result = build_siamese_sequences(sample_game_data, normalize=False)
+        result, _ = build_siamese_sequences(sample_game_data, normalize=False)
 
         n_samples = len(sample_game_data[sample_game_data["upset"].notna()])
 
@@ -163,7 +166,7 @@ class TestBuildSiameseSequences:
 
     def test_separate_masks_for_each_team(self, sample_game_data):
         """Test that underdog and favorite have separate masks."""
-        result = build_siamese_sequences(sample_game_data, normalize=False)
+        result, _ = build_siamese_sequences(sample_game_data, normalize=False)
 
         n_samples = len(sample_game_data[sample_game_data["upset"].notna()])
 
@@ -172,15 +175,15 @@ class TestBuildSiameseSequences:
 
     def test_targets_match_input(self, sample_game_data):
         """Test that targets are extracted correctly."""
-        result = build_siamese_sequences(sample_game_data, normalize=False)
+        result, _ = build_siamese_sequences(sample_game_data, normalize=False)
 
         expected_targets = sample_game_data[sample_game_data["upset"].notna()]["upset"].values
         np.testing.assert_array_equal(result.targets, expected_targets)
 
     def test_normalization_applied(self, sample_game_data):
         """Test that normalization changes values."""
-        result_normalized = build_siamese_sequences(sample_game_data, normalize=True)
-        result_raw = build_siamese_sequences(sample_game_data, normalize=False)
+        result_normalized, stats = build_siamese_sequences(sample_game_data, normalize=True)
+        result_raw, _ = build_siamese_sequences(sample_game_data, normalize=False)
 
         # Normalized values should be different from raw
         assert not np.allclose(
@@ -188,6 +191,8 @@ class TestBuildSiameseSequences:
             result_raw.underdog_sequences,
             atol=1e-6,
         )
+        # Stats should be returned when normalizing
+        assert stats is not None
 
     def test_filters_invalid_targets(self):
         """Test that games without targets are filtered."""
@@ -214,5 +219,126 @@ class TestBuildSiameseSequences:
             "over_under_normalized": [0, 0, 0],
         })
 
-        result = build_siamese_sequences(data, normalize=False)
+        result, _ = build_siamese_sequences(data, normalize=False)
         assert result.n_samples == 2
+
+
+class TestNormalizationStats:
+    """Tests for normalization stats computation and application."""
+
+    def test_stats_returned_when_normalizing(self, sample_game_data):
+        """build_siamese_sequences should return stats when normalize=True."""
+        data, stats = build_siamese_sequences(sample_game_data, normalize=True)
+
+        assert stats is not None
+        assert isinstance(stats, NormalizationStats)
+        # Should have stats for sequence features
+        assert "points_scored" in stats.sequence_stats
+        assert "points_allowed" in stats.sequence_stats
+        # Should have stats for matchup features
+        assert "spread_magnitude" in stats.matchup_stats
+        assert "home_indicator" in stats.matchup_stats
+
+    def test_stats_contain_mean_std_tuples(self, sample_game_data):
+        """Stats should contain (mean, std) tuples."""
+        _, stats = build_siamese_sequences(sample_game_data, normalize=True)
+
+        for feature, (mean, std) in stats.sequence_stats.items():
+            assert isinstance(mean, float), f"{feature} mean should be float"
+            assert isinstance(std, float), f"{feature} std should be float"
+
+        for feature, (mean, std) in stats.matchup_stats.items():
+            assert isinstance(mean, float), f"{feature} mean should be float"
+            assert isinstance(std, float), f"{feature} std should be float"
+
+    def test_no_stats_returned_without_normalization(self, sample_game_data):
+        """build_siamese_sequences should return None stats when normalize=False."""
+        _, stats = build_siamese_sequences(sample_game_data, normalize=False)
+        assert stats is None
+
+    def test_provided_stats_override_computation(self, sample_game_data):
+        """Stats parameter should override computed stats."""
+        # First, get computed stats
+        _, original_stats = build_siamese_sequences(sample_game_data, normalize=True)
+
+        # Create artificial stats with different values
+        artificial_stats = NormalizationStats(
+            sequence_stats={
+                "points_scored": (100.0, 10.0),  # Very different from real data
+                "points_allowed": (100.0, 10.0),
+                "point_diff": (0.0, 10.0),
+                "win": (0.5, 0.5),
+            },
+            matchup_stats={
+                "spread_magnitude": (0.0, 1.0),
+                "home_indicator": (0.5, 0.5),
+                "divisional_game": (0.0, 1.0),
+                "rest_advantage": (0.0, 1.0),
+                "week_number": (0.5, 0.3),
+                "primetime_game": (0.0, 1.0),
+                "is_dome": (0.0, 1.0),
+                "cold_weather": (0.0, 1.0),
+                "windy_game": (0.0, 1.0),
+                "over_under_normalized": (0.0, 1.0),
+            },
+        )
+
+        # Build with artificial stats
+        data_with_artificial, returned_stats = build_siamese_sequences(
+            sample_game_data, normalize=True, stats=artificial_stats
+        )
+
+        # Build with original computed stats
+        data_with_original, _ = build_siamese_sequences(
+            sample_game_data, normalize=True, stats=original_stats
+        )
+
+        # Should return None stats when stats are provided (not recomputed)
+        assert returned_stats is None
+
+        # The data should be different because different stats were used
+        assert not np.allclose(
+            data_with_artificial.underdog_sequences,
+            data_with_original.underdog_sequences,
+            atol=1e-3,
+        )
+
+    def test_stats_application_produces_consistent_results(self, sample_game_data):
+        """Applying same stats to same data should produce identical results."""
+        # Compute stats once
+        _, stats = build_siamese_sequences(sample_game_data, normalize=True)
+
+        # Apply stats twice
+        data1, _ = build_siamese_sequences(sample_game_data, normalize=True, stats=stats)
+        data2, _ = build_siamese_sequences(sample_game_data, normalize=True, stats=stats)
+
+        np.testing.assert_array_almost_equal(
+            data1.underdog_sequences, data2.underdog_sequences
+        )
+        np.testing.assert_array_almost_equal(
+            data1.matchup_features, data2.matchup_features
+        )
+
+    def test_train_val_split_uses_train_stats_only(self, sample_game_data):
+        """Simulates proper train/val workflow with stats from train only."""
+        # Split data (in practice would be done by CV splitter)
+        train_df = sample_game_data[sample_game_data["week"] <= 4].copy()
+        val_df = sample_game_data[sample_game_data["week"] > 4].copy()
+
+        # Build train data and get stats
+        train_data, train_stats = build_siamese_sequences(
+            train_df, normalize=True, stats=None
+        )
+        assert train_stats is not None
+
+        # Build val data using TRAIN stats
+        val_data, val_returned_stats = build_siamese_sequences(
+            val_df, normalize=True, stats=train_stats
+        )
+
+        # Val should not return new stats (using provided ones)
+        assert val_returned_stats is None
+
+        # Both should have valid shapes
+        assert train_data.n_samples > 0
+        assert val_data.n_samples > 0

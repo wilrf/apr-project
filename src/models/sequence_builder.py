@@ -12,6 +12,14 @@ from typing import Tuple, Dict, List, Optional
 from dataclasses import dataclass
 
 
+@dataclass
+class NormalizationStats:
+    """Statistics for normalizing LSTM inputs (computed from training data only)."""
+
+    sequence_stats: Dict[str, Tuple[float, float]]  # feature -> (mean, std)
+    matchup_stats: Dict[str, Tuple[float, float]]  # feature -> (mean, std)
+
+
 # Per-game features for sequence (what we track about each historical game)
 SEQUENCE_FEATURES = [
     "points_scored",
@@ -261,7 +269,8 @@ def build_siamese_sequences(
     df: pd.DataFrame,
     normalize: bool = True,
     seq_length: int = SEQUENCE_LENGTH,
-) -> SiameseLSTMData:
+    stats: Optional[NormalizationStats] = None,
+) -> Tuple[SiameseLSTMData, Optional[NormalizationStats]]:
     """
     Build Siamese LSTM-ready sequences from game data.
 
@@ -276,9 +285,13 @@ def build_siamese_sequences(
         df: DataFrame with game data and engineered features
         normalize: Whether to normalize sequence features
         seq_length: Number of historical games per team
+        stats: Optional pre-computed normalization stats (from training data).
+               If None and normalize=True, stats will be computed from this data.
+               If provided and normalize=True, provided stats will be applied.
 
     Returns:
-        SiameseLSTMData containing all arrays needed for training
+        Tuple of (SiameseLSTMData, NormalizationStats or None).
+        Stats are returned only when normalize=True and stats=None (training mode).
     """
     # Filter to games with valid targets
     valid_df = df[df["upset"].notna()].copy()
@@ -321,38 +334,68 @@ def build_siamese_sequences(
         )
 
     # Normalize sequences (separately for each team, using combined stats)
+    sequence_stats: Optional[Dict[str, Tuple[float, float]]] = None
     if normalize:
-        # Combine sequences to compute shared normalization stats
-        all_sequences = np.concatenate([underdog_sequences, favorite_sequences], axis=0)
-        all_masks = np.concatenate([underdog_masks, favorite_masks], axis=0)
-        _, stats = _normalize_sequences(all_sequences, all_masks)
+        if stats is None:
+            # TRAINING: Compute stats from this data
+            all_sequences = np.concatenate([underdog_sequences, favorite_sequences], axis=0)
+            all_masks = np.concatenate([underdog_masks, favorite_masks], axis=0)
+            _, sequence_stats = _normalize_sequences(all_sequences, all_masks)
+        else:
+            # VALIDATION/TEST: Use provided stats
+            sequence_stats = stats.sequence_stats
 
-        # Apply same normalization to both
-        underdog_sequences, _ = _normalize_sequences(underdog_sequences, underdog_masks, stats)
-        favorite_sequences, _ = _normalize_sequences(favorite_sequences, favorite_masks, stats)
+        # Apply stats to both team sequences
+        underdog_sequences, _ = _normalize_sequences(
+            underdog_sequences, underdog_masks, sequence_stats
+        )
+        favorite_sequences, _ = _normalize_sequences(
+            favorite_sequences, favorite_masks, sequence_stats
+        )
 
     # Extract matchup features
     matchup_features = _extract_matchup_features(valid_df)
 
     # Normalize matchup features
+    matchup_stats: Optional[Dict[str, Tuple[float, float]]] = None
     if normalize:
-        for f in range(matchup_features.shape[1]):
+        matchup_stats = {}
+        for f, feat_name in enumerate(MATCHUP_FEATURES):
             col = matchup_features[:, f]
-            std = col.std()
+
+            if stats is None:
+                # TRAINING: Compute from this data
+                mean, std = float(col.mean()), float(col.std())
+            else:
+                # VALIDATION/TEST: Use provided stats
+                mean, std = stats.matchup_stats.get(feat_name, (0.0, 1.0))
+
+            matchup_stats[feat_name] = (mean, std)
             if std > 0:
-                matchup_features[:, f] = (col - col.mean()) / std
+                matchup_features[:, f] = (col - mean) / std
 
     # Extract targets
     targets = valid_df["upset"].values.astype(np.float32)
 
-    return SiameseLSTMData(
-        underdog_sequences=underdog_sequences.astype(np.float32),
-        favorite_sequences=favorite_sequences.astype(np.float32),
-        matchup_features=matchup_features.astype(np.float32),
-        targets=targets,
-        underdog_masks=underdog_masks.astype(np.float32),
-        favorite_masks=favorite_masks.astype(np.float32),
-        game_ids=np.array(game_ids),
+    # Build computed stats (only when training, i.e., stats=None and normalize=True)
+    computed_stats: Optional[NormalizationStats] = None
+    if normalize and stats is None and sequence_stats is not None and matchup_stats is not None:
+        computed_stats = NormalizationStats(
+            sequence_stats=sequence_stats,
+            matchup_stats=matchup_stats,
+        )
+
+    return (
+        SiameseLSTMData(
+            underdog_sequences=underdog_sequences.astype(np.float32),
+            favorite_sequences=favorite_sequences.astype(np.float32),
+            matchup_features=matchup_features.astype(np.float32),
+            targets=targets,
+            underdog_masks=underdog_masks.astype(np.float32),
+            favorite_masks=favorite_masks.astype(np.float32),
+            game_ids=np.array(game_ids),
+        ),
+        computed_stats,
     )
 
 

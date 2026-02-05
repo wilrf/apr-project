@@ -231,3 +231,111 @@ class TestSiameseLSTMTrainerAttention:
 
         with pytest.raises(ValueError, match="Model not trained"):
             trainer.get_attention_weights(sample_training_data)
+
+
+class TestDataLeakagePrevention:
+    """Tests to verify no data leakage in normalization."""
+
+    def test_fit_stores_training_stats(self, sample_training_data):
+        """Test that fit() stores training statistics."""
+        trainer = SiameseLSTMTrainer(
+            hidden_size=16,
+            num_layers=1,
+            epochs=2,
+            batch_size=32,
+        )
+
+        # Use subset for faster test
+        subset = sample_training_data[sample_training_data["season"] >= 2021]
+        trainer.fit(subset)
+
+        # Should have stored training stats
+        assert trainer._train_stats is not None
+        assert "points_scored" in trainer._train_stats.sequence_stats
+        assert "spread_magnitude" in trainer._train_stats.matchup_stats
+
+    def test_predict_proba_uses_training_stats(self, sample_training_data):
+        """Test that predict_proba uses stored training stats, not test data stats."""
+        trainer = SiameseLSTMTrainer(
+            hidden_size=16,
+            num_layers=1,
+            epochs=2,
+            batch_size=32,
+        )
+
+        # Train on 2020-2021
+        train_data = sample_training_data[
+            (sample_training_data["season"] >= 2020)
+            & (sample_training_data["season"] <= 2021)
+        ]
+        trainer.fit(train_data)
+
+        # Predict on 2022 (different distribution shouldn't affect normalization stats)
+        test_data = sample_training_data[sample_training_data["season"] == 2022]
+        predictions = trainer.predict_proba(test_data)
+
+        # Should get valid predictions
+        assert len(predictions) > 0
+        assert all(0 <= p <= 1 for p in predictions)
+
+    def test_predict_before_fit_raises_stats_error(self, sample_training_data):
+        """Test that predicting before fit raises error about training stats."""
+        trainer = SiameseLSTMTrainer()
+        # Manually set model to non-None to test stats check
+        trainer.model = trainer._create_model()
+
+        with pytest.raises(ValueError, match="Training stats not available"):
+            trainer.predict_proba(sample_training_data)
+
+    def test_cv_folds_have_independent_stats(self, sample_training_data):
+        """Test that each CV fold computes its own stats from its training split."""
+        trainer = SiameseLSTMTrainer(
+            hidden_size=16,
+            num_layers=1,
+            epochs=1,  # Minimal training
+            batch_size=32,
+            n_folds=2,  # Just 2 folds for speed
+        )
+
+        results = trainer.cross_validate(sample_training_data)
+
+        # Should complete without errors - this verifies the workflow
+        assert len(results["fold_metrics"]) == 2
+        # Each fold should have predictions
+        for fold_pred in results["predictions"]:
+            assert len(fold_pred["y_pred"]) > 0
+            assert len(fold_pred["y_true"]) > 0
+
+    def test_cv_does_not_leak_validation_into_training(self, sample_training_data):
+        """
+        Test that CV properly separates train/val for normalization.
+
+        This is an indirect test - we verify that the workflow completes
+        and produces reasonable outputs. The actual fix ensures that
+        build_siamese_sequences is called separately for train and val
+        with train stats applied to val.
+        """
+        trainer = SiameseLSTMTrainer(
+            hidden_size=16,
+            num_layers=1,
+            epochs=2,
+            batch_size=32,
+            n_folds=2,
+        )
+
+        results = trainer.cross_validate(sample_training_data)
+
+        # Verify structure is correct
+        assert "fold_metrics" in results
+        assert "predictions" in results
+
+        # Each fold should have proper sizes
+        for fold in results["fold_metrics"]:
+            assert fold["train_size"] > 0
+            assert fold["val_size"] > 0
+            # Train should be larger than val in time-series CV
+            assert fold["train_size"] > fold["val_size"]
+
+        # Predictions should be valid probabilities
+        for pred in results["predictions"]:
+            assert all(0 <= p <= 1 for p in pred["y_pred"])
