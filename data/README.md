@@ -9,18 +9,16 @@ data/
 │
 └── features/               # Generated datasets (gitignored)
     ├── train.csv           # Training set (2005-2022)
-    ├── test.csv            # Test set (2023-2025)
-    └── columns.csv         # Feature column definitions
+    └── test.csv            # Test set (2023-2025)
 ```
 
 ## Datasets
 
-| File | Rows | Description |
-|------|------|-------------|
-| `raw/spreadspoke_scores.csv` | 14,358 | Kaggle NFL betting data |
-| `features/train.csv` | 4,346 | Training games with 61 features |
-| `features/test.csv` | 768 | Test games with 61 features |
-| `features/columns.csv` | 61 | Feature column names |
+| File | Description |
+|------|-------------|
+| `raw/spreadspoke_scores.csv` | Kaggle NFL betting data |
+| `features/train.csv` | Training games with 70 features (46 base + 24 XGB per-game lags) |
+| `features/test.csv` | Test games with 70 features |
 
 ## Data Split
 
@@ -29,15 +27,16 @@ data/
 
 ## Upset Candidates
 
-Filter to `spread_magnitude >= 3` for upset prediction:
-- Train: ~3,497 games
-- Test: ~559 games
+Only games with `spread >= 3` receive an upset label. Sub-3 games stay in the CSV with `upset = NaN` for rolling stat computation.
+- Train: 3,495 labeled games
+- Test: 558 labeled games
+- Upset rate: ~30% in both splits
 
 ## Regenerating Data
 
 ```bash
 # Run from project root
-python3 scripts/export_data.py
+python3 -m src.data.generate_features
 ```
 
 ## Sources

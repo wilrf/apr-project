@@ -51,7 +51,9 @@ class TestLoadBettingData:
 
     def test_load_betting_data_filters_by_season(self, sample_betting_csv):
         """Test filtering betting data by season range."""
-        df = load_betting_data(filepath=sample_betting_csv, min_season=2023, max_season=2023)
+        df = load_betting_data(
+            filepath=sample_betting_csv, min_season=2023, max_season=2023
+        )
         assert df["schedule_season"].min() >= 2023
         assert df["schedule_season"].max() <= 2023
         assert len(df) == 2  # Only 2023 games

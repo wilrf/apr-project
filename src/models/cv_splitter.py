@@ -58,7 +58,7 @@ class TimeSeriesCVSplitter:
             )
 
         # Validation seasons are the last n_folds seasons
-        val_seasons = seasons[-self.n_folds:]
+        val_seasons = seasons[-self.n_folds :]
 
         for val_season in val_seasons:
             # Training: all seasons before validation

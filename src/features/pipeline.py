@@ -1,387 +1,584 @@
-"""Feature engineering pipeline combining all feature calculations.
-
-Generates ~55 features for NFL upset prediction from schedule + betting data.
-"""
+"""Canonical feature engineering pipeline for NFL upset prediction."""
 
 from __future__ import annotations
 
-import pandas as pd
+from typing import Dict, List, Tuple
+
 import numpy as np
-from typing import List, Optional, Dict, Tuple
+import pandas as pd
 
-from src.features.target import calculate_upset_target
+from src.data.elo import compute_pre_game_elo
 
-# Constants
-ROLLING_WINDOW = 5
-RECENT_WINDOW = 3  # For recent form comparison
+ROLLING_WINDOW = 3
+
+_ROLLING_EFFICIENCY_GROUP = [
+    "underdog_pass_epa_roll3",
+    "underdog_rush_epa_roll3",
+    "underdog_success_rate_roll3",
+    "underdog_cpoe_roll3",
+    "underdog_turnover_margin_roll3",
+    "favorite_pass_epa_roll3",
+    "favorite_rush_epa_roll3",
+    "favorite_success_rate_roll3",
+    "favorite_cpoe_roll3",
+    "favorite_turnover_margin_roll3",
+]
+
+_DIFFERENTIAL_GROUP = [
+    "pass_epa_diff",
+    "rush_epa_diff",
+    "success_rate_diff",
+    "cpoe_diff",
+    "turnover_margin_diff",
+]
+
+_VOLATILITY_TREND_GROUP = [
+    "underdog_total_epa_std_roll3",
+    "favorite_total_epa_std_roll3",
+    "total_epa_std_diff",
+    "underdog_success_rate_std_roll3",
+    "favorite_success_rate_std_roll3",
+    "success_rate_std_diff",
+    "underdog_total_epa_trend",
+    "favorite_total_epa_trend",
+    "total_epa_trend_diff",
+    "underdog_success_rate_trend",
+    "favorite_success_rate_trend",
+    "success_rate_trend_diff",
+]
+
+_SCHEDULE_CONTEXT_GROUP = [
+    "underdog_rest_days",
+    "favorite_rest_days",
+    "rest_days_diff",
+    "short_week_game",
+    "divisional_game",
+]
+
+_MARKET_GROUP = [
+    "home_implied_points",
+    "away_implied_points",
+    "spread_magnitude",
+    "total_line",
+]
+
+_ELO_GROUP = [
+    "underdog_elo",
+    "favorite_elo",
+    "elo_diff",
+]
+
+_ENVIRONMENT_GROUP = [
+    "temperature",
+    "wind_speed",
+    "is_dome",
+    "temperature_missing",
+    "wind_speed_missing",
+]
+
+_GAME_CONTEXT_GROUP = [
+    "underdog_is_home",
+    "week_number",
+]
+
+# Per-game lag features for XGBoost: individual game stats for last 3 games.
+# Lets XGB discover game-by-game patterns that rolling averages hide
+# (e.g., "terrible last game but good 3-game average").
+_XGB_GAME_STATS = ["total_epa", "success_rate", "turnover_margin", "margin"]
+_XGB_PER_GAME_GROUP: List[str] = [
+    f"{role}_last{lag}_{stat}"
+    for lag in [1, 2, 3]
+    for role in ["underdog", "favorite"]
+    for stat in _XGB_GAME_STATS
+]  # 3 lags × 2 roles × 4 stats = 24 features
+
+FEATURE_COLUMNS: List[str] = (
+    _ROLLING_EFFICIENCY_GROUP
+    + _DIFFERENTIAL_GROUP
+    + _VOLATILITY_TREND_GROUP
+    + _SCHEDULE_CONTEXT_GROUP
+    + _MARKET_GROUP
+    + _ELO_GROUP
+    + _ENVIRONMENT_GROUP
+    + _GAME_CONTEXT_GROUP
+)
+
+FEATURE_COLUMNS_NO_SPREAD: List[str] = [
+    feature for feature in FEATURE_COLUMNS if feature not in set(_MARKET_GROUP)
+]
+
+# XGBoost gets the base 46 features PLUS per-game lag features (70 total).
+# The lag features give XGB individual game stats that rolling averages destroy,
+# letting it learn non-linear patterns like "bad last game, good 3-game average".
+XGB_FEATURE_COLUMNS: List[str] = FEATURE_COLUMNS + _XGB_PER_GAME_GROUP  # 70
+
+XGB_FEATURE_COLUMNS_NO_SPREAD: List[str] = [
+    f for f in XGB_FEATURE_COLUMNS if f not in set(_MARKET_GROUP)
+]  # 66
+
+# LSTM matchup context: minimal, only things the sequence CAN'T know.
+# The LSTM sequence encoder learns team form, trends, and volatility from
+# raw game-by-game data. Matchup context provides only external context
+# (opponent strength, market view, venue, weather, schedule).
+LSTM_MATCHUP_FEATURES: List[str] = [
+    "spread_magnitude",  # market's view
+    "total_line",  # expected scoring environment
+    "underdog_elo",  # underdog long-range strength
+    "favorite_elo",  # favorite long-range strength
+    "underdog_is_home",  # venue for this game
+    "underdog_rest_days",  # schedule for this game
+    "favorite_rest_days",  # schedule for this game
+    "week_number",  # season context
+    "divisional_game",  # rivalry factor
+    "is_dome",  # weather/venue
+]  # 10 total
+
+_LSTM_MARKET_FEATURES = {"spread_magnitude", "total_line"}
+LSTM_MATCHUP_FEATURES_NO_SPREAD: List[str] = [
+    f for f in LSTM_MATCHUP_FEATURES if f not in _LSTM_MARKET_FEATURES
+]  # 8 total
 
 
-# =============================================================================
-# ROLLING STATS CALCULATION
-# =============================================================================
+def _identify_underdog(row: pd.Series) -> str | None:
+    """Identify the underdog team whenever the betting row names a favorite."""
+    if pd.isna(row.get("team_favorite_id")) or pd.isna(row.get("spread_favorite")):
+        return None
 
-def _aggregate_team_game_stats(df: pd.DataFrame) -> pd.DataFrame:
-    """Convert game-level data to team-game records (home + away rows per game)."""
+    favorite = row["team_favorite_id"]
+    if favorite == row["home_team"]:
+        return row["away_team"]
+    return row["home_team"]
+
+
+def calculate_upset_target(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Compute the canonical upset target.
+
+    Only games with spread >= 3 receive a target label (0 or 1).
+    Sub-3 spread games get upset=NaN and are excluded from training/evaluation.
+    Games remain in the DataFrame for feature computation (rolling stats need them).
+    """
+    result = df.copy()
+    spread_abs = pd.to_numeric(result["spread_favorite"], errors="coerce").abs()
+
+    result["favorite"] = result["team_favorite_id"].where(
+        result["team_favorite_id"].notna() & spread_abs.notna()
+    )
+    result["underdog"] = result.apply(_identify_underdog, axis=1)
+    result["winner"] = None
+
+    home_wins = result["home_score"] > result["away_score"]
+    away_wins = result["away_score"] > result["home_score"]
+    result.loc[home_wins, "winner"] = result.loc[home_wins, "home_team"]
+    result.loc[away_wins, "winner"] = result.loc[away_wins, "away_team"]
+
+    # Default to NaN — only eligible games get a label
+    result["upset"] = np.nan
+
+    eligible = spread_abs >= 3
+    has_winner = result["winner"].notna()
+    has_favorite = result["favorite"].notna()
+
+    # Eligible games with a clear winner get upset = 0 or 1
+    labelable = eligible & has_winner & has_favorite
+    result.loc[labelable, "upset"] = (
+        result.loc[labelable, "winner"] == result.loc[labelable, "underdog"]
+    ).astype(float)
+
+    result["upset_tier"] = np.select(
+        [
+            spread_abs.between(3, 6.5, inclusive="both"),
+            spread_abs.between(7, 13.5, inclusive="both"),
+            spread_abs >= 14,
+        ],
+        ["tier_1", "tier_2", "tier_3"],
+        default=None,
+    )
+
+    return result
+
+
+def _sum_if_any(*values: float) -> float:
+    """Return the sum of finite values, preserving NaN when all are missing."""
+    valid = [value for value in values if pd.notna(value)]
+    if not valid:
+        return np.nan
+    return float(sum(valid))
+
+
+def _aggregate_team_games(df: pd.DataFrame) -> pd.DataFrame:
+    """Convert game rows to one row per team per game."""
     records = []
-    for _, g in df.iterrows():
-        home, away = g.get("home_score", np.nan), g.get("away_score", np.nan)
-        valid = pd.notna(home) and pd.notna(away)
-        base = {"game_id": g.get("game_id", f"{g['season']}_{g['week']}_{g['home_team']}_{g['away_team']}"),
-                "season": g["season"], "week": g["week"]}
-        for is_home, team, opp, scored, allowed in [
-            (1, g["home_team"], g["away_team"], home, away),
-            (0, g["away_team"], g["home_team"], away, home)
+
+    for _, row in df.iterrows():
+        game_date = pd.to_datetime(row.get("gameday"), errors="coerce")
+        for is_home, team, opponent, scored, allowed, prefix in [
+            (
+                1.0,
+                row["home_team"],
+                row["away_team"],
+                row.get("home_score", np.nan),
+                row.get("away_score", np.nan),
+                "home",
+            ),
+            (
+                0.0,
+                row["away_team"],
+                row["home_team"],
+                row.get("away_score", np.nan),
+                row.get("home_score", np.nan),
+                "away",
+            ),
         ]:
-            diff = scored - allowed if valid else np.nan
-            win = (1 if scored > allowed else 0) if valid else np.nan
-            records.append({**base, "team": team, "opponent": opp, "is_home": is_home,
-                          "points_scored": scored, "points_allowed": allowed,
-                          "point_diff": diff, "win": win, "loss": 1 - win if valid else 0})
+            pass_epa = row.get(f"{prefix}_off_pass_epa", np.nan)
+            rush_epa = row.get(f"{prefix}_off_rush_epa", np.nan)
+            records.append(
+                {
+                    "game_id": row["game_id"],
+                    "season": row["season"],
+                    "week": row["week"],
+                    "team": team,
+                    "opponent": opponent,
+                    "is_home": is_home,
+                    "game_date": game_date,
+                    "points_scored": float(scored) if pd.notna(scored) else np.nan,
+                    "points_allowed": float(allowed) if pd.notna(allowed) else np.nan,
+                    "pass_epa": float(pass_epa) if pd.notna(pass_epa) else np.nan,
+                    "rush_epa": float(rush_epa) if pd.notna(rush_epa) else np.nan,
+                    "total_epa": _sum_if_any(pass_epa, rush_epa),
+                    "success_rate": row.get(f"{prefix}_success_rate", np.nan),
+                    "cpoe": row.get(f"{prefix}_cpoe", np.nan),
+                    "turnover_margin": row.get(f"{prefix}_turnover_margin", np.nan),
+                    "days_since_last_game": row.get(f"{prefix}_rest", np.nan),
+                }
+            )
+
     return pd.DataFrame(records)
 
 
-def _calculate_rolling_stats_for_team(team_games: pd.DataFrame, window: int = ROLLING_WINDOW) -> pd.DataFrame:
-    """Calculate rolling stats for a team's games using shift(1) to prevent data leakage."""
-    r = team_games.sort_values("week").copy()
-    idx0 = r.index[0]
-
-    # Rolling means and std for core stats
-    for col in ["points_scored", "points_allowed", "point_diff", "win"]:
-        if col in r.columns:
-            shifted = r[col].shift(1)
-            r[f"{col}_roll{window}"] = shifted.rolling(window=window, min_periods=1).mean()
-            r.loc[idx0, f"{col}_roll{window}"] = np.nan
-            if col == "points_scored":
-                r[f"{col}_std{window}"] = shifted.rolling(window=window, min_periods=2).std()
-                r.loc[idx0, f"{col}_std{window}"] = np.nan
-
-    # Recent form (3-game window)
-    for col in ["points_scored", "point_diff"]:
-        if col in r.columns:
-            r[f"{col}_recent{RECENT_WINDOW}"] = r[col].shift(1).rolling(window=RECENT_WINDOW, min_periods=1).mean()
-            r.loc[idx0, f"{col}_recent{RECENT_WINDOW}"] = np.nan
-
-    # Streaks, trend, season stats
-    r["win_streak"] = _calculate_win_streak(r["win"].shift(1))
-    r["loss_streak"] = _calculate_win_streak(r["loss"].shift(1))
-    r["point_diff_trend"] = _calculate_trend(r["point_diff"].shift(1), window)
-    r["season_win_pct"] = r["win"].shift(1).expanding(min_periods=1).mean()
-    r.loc[idx0, "season_win_pct"] = np.nan
-
-    # Home/away splits
-    for loc, mask in [("home", r["is_home"]), ("away", 1 - r["is_home"])]:
-        wins = (r["win"] * mask).shift(1).expanding().sum()
-        games = mask.shift(1).expanding().sum()
-        r[f"{loc}_win_pct"] = wins / games.replace(0, np.nan)
-
-    return r
+def _sort_team_games(team_games: pd.DataFrame) -> pd.DataFrame:
+    """Sort chronologically with safe fallbacks for tests."""
+    sort_cols = [
+        column
+        for column in ["season", "week", "game_date", "game_id"]
+        if column in team_games
+    ]
+    return team_games.sort_values(sort_cols).copy()
 
 
-def _calculate_win_streak(wins: pd.Series) -> pd.Series:
-    """Calculate current win streak (consecutive wins)."""
-    streak = pd.Series(0, index=wins.index)
-    current_streak = 0
+def _calculate_team_rollups(
+    team_games: pd.DataFrame,
+    window: int = ROLLING_WINDOW,
+) -> pd.DataFrame:
+    """Compute rolling means, volatility, and trend for one team."""
+    result = _sort_team_games(team_games)
+    idx0 = result.index[0]
 
-    for i, win in enumerate(wins):
-        if pd.isna(win):
-            streak.iloc[i] = 0
-            current_streak = 0
-        elif win == 1:
-            current_streak += 1
-            streak.iloc[i] = current_streak
-        else:
-            current_streak = 0
-            streak.iloc[i] = 0
+    for col in [
+        "pass_epa",
+        "rush_epa",
+        "success_rate",
+        "cpoe",
+        "turnover_margin",
+        "total_epa",
+    ]:
+        shifted = result[col].shift(1)
+        result[f"{col}_roll{window}"] = shifted.rolling(
+            window=window,
+            min_periods=1,
+        ).mean()
+        result.loc[idx0, f"{col}_roll{window}"] = np.nan
 
-    return streak
+    for col in ["total_epa", "success_rate"]:
+        shifted = result[col].shift(1)
+        result[f"{col}_std_roll{window}"] = shifted.rolling(
+            window=window,
+            min_periods=2,
+        ).std()
+        result.loc[idx0, f"{col}_std_roll{window}"] = np.nan
 
+        result[f"{col}_trend"] = shifted - shifted.rolling(
+            window=window,
+            min_periods=1,
+        ).mean()
+        result.loc[idx0, f"{col}_trend"] = np.nan
 
-def _calculate_trend(values: pd.Series, window: int) -> pd.Series:
-    """Calculate linear trend (slope) over rolling window."""
-    def slope(arr):
-        if len(arr) < 2 or np.isnan(arr).all():
-            return np.nan
-        x = np.arange(len(arr))
-        valid = ~np.isnan(arr)
-        if valid.sum() < 2:
-            return np.nan
-        coeffs = np.polyfit(x[valid], arr[valid], 1)
-        return coeffs[0]
+    # Per-game lag features for XGBoost: individual stats from last 1, 2, 3 games.
+    # shift(1) = most recent game before this one, shift(2) = two games ago, etc.
+    margin = result["points_scored"] - result["points_allowed"]
+    for lag in [1, 2, 3]:
+        for col in ["total_epa", "success_rate", "turnover_margin"]:
+            result[f"{col}_last{lag}"] = result[col].shift(lag)
+        result[f"margin_last{lag}"] = margin.shift(lag)
 
-    return values.rolling(window=window, min_periods=2).apply(slope, raw=True)
-
-
-def _compute_all_rolling_stats(df: pd.DataFrame) -> Dict[Tuple[str, int, int], pd.Series]:
-    """
-    Compute rolling stats for all teams across all seasons.
-
-    Returns dict mapping (team, season, week) to stats.
-    """
-    team_stats = _aggregate_team_game_stats(df)
-
-    rolling_lookup = {}
-
-    for (team, season), group in team_stats.groupby(["team", "season"]):
-        rolling = _calculate_rolling_stats_for_team(group)
-        for _, row in rolling.iterrows():
-            key = (team, season, row["week"])
-            rolling_lookup[key] = row
-
-    return rolling_lookup
+    return result
 
 
-# =============================================================================
-# SITUATIONAL FEATURES
-# =============================================================================
+def _compute_team_lookup(df: pd.DataFrame) -> Dict[Tuple[str, str], pd.Series]:
+    """Return (team, game_id) -> rolling-stat row across all seasons."""
+    team_games = _aggregate_team_games(df)
+    lookup: Dict[Tuple[str, str], pd.Series] = {}
 
-def _add_situational_features(df: pd.DataFrame) -> pd.DataFrame:
-    """Add situational/contextual features."""
-    r = df.copy()
+    for team, group in team_games.groupby("team"):
+        rolled = _calculate_team_rollups(group)
+        for _, row in rolled.iterrows():
+            lookup[(team, row["game_id"])] = row
 
-    def _col(name, default=0):
-        """Get column or default Series."""
-        return r[name] if name in r.columns else pd.Series(default, index=r.index)
-
-    r["week_number"] = r["week"] / 18.0
-    r["divisional_game"] = pd.to_numeric(_col("div_game", 0), errors="coerce").fillna(0).astype(float)
-
-    # Rest days (vectorized)
-    underdog_is_home = r["underdog"] == r["home_team"]
-    r["underdog_rest"] = np.where(underdog_is_home, _col("home_rest", np.nan), _col("away_rest", np.nan))
-    r["favorite_rest"] = np.where(underdog_is_home, _col("away_rest", np.nan), _col("home_rest", np.nan))
-    r["rest_advantage"] = (pd.Series(r["underdog_rest"]) - pd.Series(r["favorite_rest"])).fillna(0).values
-
-    # Rest-based flags
-    for team in ["underdog", "favorite"]:
-        r[f"{team}_off_bye"] = (r[f"{team}_rest"] >= 10).astype(float)
-        r[f"{team}_short_week"] = (r[f"{team}_rest"] <= 5).astype(float)
-
-    r["home_indicator"] = underdog_is_home.astype(float)
-    r["neutral_site"] = pd.to_numeric(_col("stadium_neutral", 0), errors="coerce").fillna(0).astype(float)
-
-    # Weather
-    r["temperature"] = pd.to_numeric(_col("temp", _col("weather_temperature", 70)), errors="coerce").fillna(70)
-    r["wind_speed"] = pd.to_numeric(_col("wind", _col("weather_wind_mph", 0)), errors="coerce").fillna(0)
-    r["is_dome"] = _col("roof", "outdoors").isin(["dome", "closed"]).astype(float)
-    outdoors = r["is_dome"] == 0
-    r["cold_weather"] = ((r["temperature"] < 40) & outdoors).astype(float)
-    r["windy_game"] = ((r["wind_speed"] > 15) & outdoors).astype(float)
-
-    # Primetime detection (vectorized)
-    weekday = _col("weekday", "Sunday").fillna("").astype(str).str.lower()
-    gametime = _col("gametime", "1:00 PM").fillna("").astype(str).str.lower()
-    r["primetime_game"] = (weekday.isin(["monday", "thursday"]) |
-                           ((weekday == "sunday") & (gametime.str.contains("8:|20:")))).astype(float)
-
-    return r
+    return lookup
 
 
-# =============================================================================
-# SPREAD-RELATED FEATURES
-# =============================================================================
-
-def _add_spread_features(df: pd.DataFrame) -> pd.DataFrame:
-    """Add spread and betting-related features."""
-    r = df.copy()
-    spread_col = r["spread_favorite"] if "spread_favorite" in r.columns else pd.Series(0, index=r.index)
-    r["spread_magnitude"] = pd.to_numeric(spread_col, errors="coerce").abs().fillna(0)
-
-    # Over/under (try multiple column names)
-    ou = next((pd.to_numeric(r[c], errors="coerce") for c in ["over_under_line", "total_line", "total"] if c in r.columns), None)
-    r["over_under"] = ou.fillna(45.0) if ou is not None else 45.0
-    r["over_under_normalized"] = (r["over_under"] - 45) / 10
-    r["high_total"], r["low_total"] = (r["over_under"] > 48).astype(float), (r["over_under"] < 42).astype(float)
-
-    # Spread categories
-    sm = r["spread_magnitude"]
-    r["spread_small"] = ((sm >= 3) & (sm < 7)).astype(float)
-    r["spread_medium"] = ((sm >= 7) & (sm < 10)).astype(float)
-    r["spread_large"] = (sm >= 10).astype(float)
-
-    # Implied scores
-    r["favorite_implied_score"] = (r["over_under"] + sm) / 2
-    r["underdog_implied_score"] = (r["over_under"] - sm) / 2
-
-    return r
+def _get_total_line(df: pd.DataFrame) -> pd.Series:
+    """Return the available over/under column as a float series."""
+    for candidate in ["over_under_line", "total_line", "total"]:
+        if candidate in df.columns:
+            return pd.to_numeric(df[candidate], errors="coerce")
+    return pd.Series(np.nan, index=df.index)
 
 
-# =============================================================================
-# MATCHUP DIFFERENTIAL FEATURES
-# =============================================================================
-
-def _add_matchup_features(df: pd.DataFrame, rolling_lookup: Dict[Tuple[str, int, int], pd.Series]) -> pd.DataFrame:
-    """Add matchup differential features using rolling stats."""
-    r = df.copy()
-    rolling_cols = ["points_scored_roll5", "points_allowed_roll5", "point_diff_roll5", "win_roll5",
-                    "points_scored_std5", "points_scored_recent3", "point_diff_recent3", "win_streak",
-                    "loss_streak", "point_diff_trend", "season_win_pct", "home_win_pct", "away_win_pct"]
-
-    # Initialize and populate rolling stats
-    for prefix in ["underdog", "favorite"]:
-        for col in rolling_cols:
-            r[f"{prefix}_{col}"] = np.nan
-        for idx, row in r.iterrows():
-            key = (row.get(prefix), row["season"], row["week"])
-            if key[0] and key in rolling_lookup:
-                for col in rolling_cols:
-                    if col in rolling_lookup[key].index:
-                        r.at[idx, f"{prefix}_{col}"] = rolling_lookup[key][col]
-
-    # Differentials (all fillna(0))
-    diffs = [("offense_defense_mismatch", "underdog_points_scored_roll5", "favorite_points_allowed_roll5"),
-             ("defense_offense_mismatch", "favorite_points_scored_roll5", "underdog_points_allowed_roll5"),
-             ("point_diff_differential", "underdog_point_diff_roll5", "favorite_point_diff_roll5"),
-             ("win_pct_differential", "underdog_win_roll5", "favorite_win_roll5"),
-             ("season_win_pct_diff", "underdog_season_win_pct", "favorite_season_win_pct"),
-             ("consistency_diff", "favorite_points_scored_std5", "underdog_points_scored_std5"),
-             ("momentum_diff", "underdog_point_diff_trend", "favorite_point_diff_trend"),
-             ("recent_form_diff", "underdog_point_diff_recent3", "favorite_point_diff_recent3"),
-             ("win_streak_diff", "underdog_win_streak", "favorite_win_streak")]
-    for name, col_a, col_b in diffs:
-        r[name] = (r[col_a] - r[col_b]).fillna(0)
-
-    # Situational split differential
-    is_home = r["home_indicator"] == 1
-    r["underdog_relevant_split"] = np.where(is_home, r["underdog_home_win_pct"], r["underdog_away_win_pct"])
-    r["favorite_relevant_split"] = np.where(is_home, r["favorite_away_win_pct"], r["favorite_home_win_pct"])
-    r["situational_split_diff"] = (r["underdog_relevant_split"] - r["favorite_relevant_split"]).fillna(0)
-
-    return r
+def _get_numeric_series(
+    df: pd.DataFrame,
+    primary: str,
+    fallback: str | None = None,
+    default: float = np.nan,
+) -> pd.Series:
+    """Return a numeric series with safe defaults."""
+    if primary in df.columns:
+        return pd.to_numeric(df[primary], errors="coerce")
+    if fallback is not None and fallback in df.columns:
+        return pd.to_numeric(df[fallback], errors="coerce")
+    return pd.Series(default, index=df.index, dtype=float)
 
 
-# =============================================================================
-# INTERACTION FEATURES
-# =============================================================================
-
-def _add_interaction_features(df: pd.DataFrame) -> pd.DataFrame:
-    """Add interaction features combining multiple signals."""
-    r = df.copy()
-    sm = r["spread_magnitude"]
-
-    # Multiplication interactions
-    r["spread_x_momentum"] = sm * r["momentum_diff"]
-    r["spread_x_win_streak"] = sm * r["underdog_win_streak"].fillna(0)
-    r["rest_x_home"] = r["rest_advantage"] * r["home_indicator"]
-    r["spread_x_point_diff"] = sm * (r["point_diff_differential"] / 10)
-    r["momentum_x_home"] = r["momentum_diff"] * r["home_indicator"]
-    r["divisional_x_spread"] = r["divisional_game"] * sm
-    r["weather_x_spread"] = (r["cold_weather"] + r["windy_game"]) * sm
-
-    # Indicator features
-    r["hot_underdog"] = ((r["underdog_win_streak"].fillna(0) >= 2) & (sm > 6)).astype(float)
-    r["cold_favorite"] = (r["favorite_loss_streak"].fillna(0) >= 2).astype(float)
-    r["bounce_back"] = ((r["underdog_loss_streak"].fillna(0) >= 1) &
-                        (r["underdog_season_win_pct"].fillna(0) > 0.5)).astype(float)
-
-    return r
+def _get_string_series(
+    df: pd.DataFrame,
+    column: str,
+    default: str,
+) -> pd.Series:
+    """Return a string series with safe defaults."""
+    if column in df.columns:
+        return df[column].fillna(default).astype(str)
+    return pd.Series(default, index=df.index, dtype=str)
 
 
-# =============================================================================
-# MAIN PIPELINE CLASS
-# =============================================================================
+def get_feature_columns() -> List[str]:
+    """Return the canonical flat feature list."""
+    return FEATURE_COLUMNS.copy()
+
+
+def get_no_spread_feature_columns() -> List[str]:
+    """Return the feature list without the direct market features."""
+    return FEATURE_COLUMNS_NO_SPREAD.copy()
+
+
+def get_xgb_feature_columns() -> List[str]:
+    """Return the expanded XGB feature list (base 46 + 24 per-game lag)."""
+    return XGB_FEATURE_COLUMNS.copy()
+
+
+def get_xgb_no_spread_feature_columns() -> List[str]:
+    """Return the XGB feature list without market features."""
+    return XGB_FEATURE_COLUMNS_NO_SPREAD.copy()
+
 
 class FeatureEngineeringPipeline:
-    """
-    Pipeline for generating ~55 features for NFL upset prediction.
-
-    Features include:
-    - Rolling team performance stats
-    - Situational/contextual features
-    - Spread and betting features
-    - Matchup differentials
-    - Momentum/trend indicators
-    - Interaction features
-    """
+    """Multi-representation feature pipeline: 46 base + 24 XGB per-game lag features."""
 
     def __init__(
         self,
         exclude_week_1: bool = True,
         rolling_window: int = ROLLING_WINDOW,
     ):
-        """
-        Initialize pipeline.
-
-        Args:
-            exclude_week_1: Whether to exclude Week 1 games (no prior data)
-            rolling_window: Window size for rolling stats
-        """
         self.exclude_week_1 = exclude_week_1
         self.rolling_window = rolling_window
 
     def transform(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Apply full feature engineering pipeline.
+        """Apply the canonical feature engineering pipeline."""
+        result = calculate_upset_target(df)
 
-        Args:
-            df: Raw merged game data
+        elo = compute_pre_game_elo(result)
+        result = result.merge(elo, on="game_id", how="left")
 
-        Returns:
-            DataFrame with all engineered features (~55 features)
-        """
-        result = df.copy()
+        team_lookup = _compute_team_lookup(result)
 
-        # Step 1: Calculate target variable (identifies underdog/favorite)
-        result = calculate_upset_target(result)
+        spread_abs = pd.to_numeric(result["spread_favorite"], errors="coerce").abs()
+        favorite_is_home = result["favorite"] == result["home_team"]
+        total_line = _get_total_line(result).fillna(45.0)
 
-        # Step 2: Compute rolling stats for all teams
-        rolling_lookup = _compute_all_rolling_stats(result)
+        result["spread_magnitude"] = spread_abs.fillna(0.0)
+        result["total_line"] = total_line
+        result["home_implied_points"] = np.where(
+            favorite_is_home,
+            (total_line + spread_abs.fillna(0.0)) / 2.0,
+            (total_line - spread_abs.fillna(0.0)) / 2.0,
+        )
+        result["away_implied_points"] = total_line - result["home_implied_points"]
 
-        # Step 3: Add spread features
-        result = _add_spread_features(result)
+        result["underdog_is_home"] = (result["underdog"] == result["home_team"]).astype(
+            float
+        )
+        result["week_number"] = pd.to_numeric(result["week"], errors="coerce").astype(
+            float
+        )
+        home_rest = _get_numeric_series(result, "home_rest")
+        away_rest = _get_numeric_series(result, "away_rest")
+        result["divisional_game"] = (
+            pd.to_numeric(
+                result["div_game"]
+                if "div_game" in result.columns
+                else pd.Series(0.0, index=result.index),
+                errors="coerce",
+            )
+            .fillna(0.0)
+            .astype(float)
+        )
 
-        # Step 4: Add situational features
-        result = _add_situational_features(result)
+        result["underdog_rest_days"] = np.where(
+            result["underdog_is_home"] == 1.0,
+            home_rest,
+            away_rest,
+        )
+        result["favorite_rest_days"] = np.where(
+            result["underdog_is_home"] == 1.0,
+            away_rest,
+            home_rest,
+        )
+        result["rest_days_diff"] = (
+            result["underdog_rest_days"] - result["favorite_rest_days"]
+        )
+        result["short_week_game"] = (
+            (result["underdog_rest_days"].fillna(7) <= 5)
+            | (result["favorite_rest_days"].fillna(7) <= 5)
+        ).astype(float)
 
-        # Step 5: Add matchup differential features
-        result = _add_matchup_features(result, rolling_lookup)
+        raw_temp = _get_numeric_series(result, "temp", fallback="weather_temperature")
+        raw_wind = _get_numeric_series(result, "wind", fallback="weather_wind_mph")
+        roof = _get_string_series(result, "roof", "outdoors")
+        result["temperature_missing"] = raw_temp.isna().astype(float)
+        result["wind_speed_missing"] = raw_wind.isna().astype(float)
+        result["temperature"] = raw_temp.fillna(70.0)
+        result["wind_speed"] = raw_wind.fillna(0.0)
+        result["is_dome"] = roof.isin(["dome", "closed"]).astype(float)
 
-        # Step 6: Add interaction features
-        result = _add_interaction_features(result)
+        rolling_stats = [
+            "pass_epa_roll3",
+            "rush_epa_roll3",
+            "success_rate_roll3",
+            "cpoe_roll3",
+            "turnover_margin_roll3",
+            "total_epa_std_roll3",
+            "success_rate_std_roll3",
+            "total_epa_trend",
+            "success_rate_trend",
+        ]
+        # Per-game lag stats for XGBoost (internal column names in team rollups)
+        lag_stats = [
+            f"{stat}_last{lag}"
+            for lag in [1, 2, 3]
+            for stat in _XGB_GAME_STATS
+        ]  # 12 internal lag columns
 
-        # Step 7: Exclude Week 1 if configured
+        for prefix in ["underdog", "favorite"]:
+            for stat in rolling_stats:
+                result[f"{prefix}_{stat}"] = np.nan
+            # Initialize XGB lag columns
+            for lag in [1, 2, 3]:
+                for stat in _XGB_GAME_STATS:
+                    result[f"{prefix}_last{lag}_{stat}"] = np.nan
+
+        for idx, row in result.iterrows():
+            for prefix in ["underdog", "favorite"]:
+                team = row.get(prefix)
+                key = (team, row["game_id"])
+                if team is None or key not in team_lookup:
+                    continue
+
+                lookup_row = team_lookup[key]
+                for stat in rolling_stats:
+                    result.at[idx, f"{prefix}_{stat}"] = lookup_row.get(stat, np.nan)
+                # Extract per-game lag stats for XGBoost
+                for lag in [1, 2, 3]:
+                    for stat in _XGB_GAME_STATS:
+                        internal_key = f"{stat}_last{lag}"
+                        external_key = f"{prefix}_last{lag}_{stat}"
+                        result.at[idx, external_key] = lookup_row.get(
+                            internal_key, np.nan
+                        )
+
+        result["pass_epa_diff"] = (
+            result["underdog_pass_epa_roll3"] - result["favorite_pass_epa_roll3"]
+        )
+        result["rush_epa_diff"] = (
+            result["underdog_rush_epa_roll3"] - result["favorite_rush_epa_roll3"]
+        )
+        result["success_rate_diff"] = (
+            result["underdog_success_rate_roll3"]
+            - result["favorite_success_rate_roll3"]
+        )
+        result["cpoe_diff"] = result["underdog_cpoe_roll3"] - result["favorite_cpoe_roll3"]
+        result["turnover_margin_diff"] = (
+            result["underdog_turnover_margin_roll3"]
+            - result["favorite_turnover_margin_roll3"]
+        )
+
+        result["total_epa_std_diff"] = (
+            result["underdog_total_epa_std_roll3"]
+            - result["favorite_total_epa_std_roll3"]
+        )
+        result["success_rate_std_diff"] = (
+            result["underdog_success_rate_std_roll3"]
+            - result["favorite_success_rate_std_roll3"]
+        )
+        result["total_epa_trend_diff"] = (
+            result["underdog_total_epa_trend"] - result["favorite_total_epa_trend"]
+        )
+        result["success_rate_trend_diff"] = (
+            result["underdog_success_rate_trend"]
+            - result["favorite_success_rate_trend"]
+        )
+
+        result["underdog_elo"] = np.where(
+            result["underdog_is_home"] == 1.0,
+            result["home_elo_pre"],
+            result["away_elo_pre"],
+        )
+        result["favorite_elo"] = np.where(
+            result["underdog_is_home"] == 1.0,
+            result["away_elo_pre"],
+            result["home_elo_pre"],
+        )
+        result["elo_diff"] = result["underdog_elo"] - result["favorite_elo"]
+
         if self.exclude_week_1:
             result = result[result["week"] > 1].copy()
 
-        # Step 8: Exclude edge cases (spread >= 3 but no rolling stats)
-        # These are ~5 games where teams have no prior history (relocation, hurricane postponement, etc.)
-        has_spread = result["spread_magnitude"] >= 3
-        has_rolling = (result["underdog_points_scored_roll5"].notna() &
-                       (result["underdog_points_scored_roll5"] != 0))
-        result = result[~has_spread | has_rolling].copy()
-
-        # Step 9: Fill any remaining NaNs in feature columns
-        for col in self.get_feature_columns():
-            if col in result.columns:
-                result[col] = result[col].fillna(0)
+        # Fill NaN with 0.0 for all feature columns (base + XGB extras)
+        all_feature_cols = set(FEATURE_COLUMNS + _XGB_PER_GAME_GROUP)
+        for feature in all_feature_cols:
+            result[feature] = pd.to_numeric(result[feature], errors="coerce").fillna(0.0)
 
         return result
 
+    def get_feature_columns(self) -> List[str]:
+        """Return the canonical flat feature list."""
+        return FEATURE_COLUMNS.copy()
+
+    def get_no_spread_feature_columns(self) -> List[str]:
+        """Return the canonical no-spread flat feature list."""
+        return FEATURE_COLUMNS_NO_SPREAD.copy()
+
     def get_feature_groups(self) -> Dict[str, List[str]]:
-        """Get features organized by category for analysis."""
+        """Return feature groups for analysis and reporting."""
         return {
-            "spread": ["spread_magnitude", "over_under", "over_under_normalized", "high_total", "low_total",
-                       "spread_small", "spread_medium", "spread_large", "favorite_implied_score", "underdog_implied_score"],
-            "situational": ["week_number", "divisional_game", "home_indicator", "neutral_site", "primetime_game",
-                           "rest_advantage", "underdog_rest", "favorite_rest", "underdog_off_bye", "favorite_off_bye",
-                           "underdog_short_week", "favorite_short_week", "is_dome", "cold_weather", "windy_game"],
-            "underdog_performance": ["underdog_points_scored_roll5", "underdog_points_allowed_roll5",
-                                     "underdog_point_diff_roll5", "underdog_win_roll5", "underdog_points_scored_std5",
-                                     "underdog_win_streak", "underdog_loss_streak", "underdog_season_win_pct"],
-            "favorite_performance": ["favorite_points_scored_roll5", "favorite_points_allowed_roll5",
-                                     "favorite_point_diff_roll5", "favorite_win_roll5", "favorite_points_scored_std5",
-                                     "favorite_win_streak", "favorite_loss_streak", "favorite_season_win_pct"],
-            "matchup": ["offense_defense_mismatch", "defense_offense_mismatch", "point_diff_differential",
-                       "win_pct_differential", "season_win_pct_diff", "consistency_diff", "momentum_diff",
-                       "recent_form_diff", "win_streak_diff", "situational_split_diff"],
-            "interaction": ["spread_x_momentum", "spread_x_win_streak", "rest_x_home", "spread_x_point_diff",
-                           "momentum_x_home", "divisional_x_spread", "weather_x_spread", "hot_underdog",
-                           "cold_favorite", "bounce_back"],
+            "rolling_efficiency": list(_ROLLING_EFFICIENCY_GROUP),
+            "differentials": list(_DIFFERENTIAL_GROUP),
+            "volatility_trend": list(_VOLATILITY_TREND_GROUP),
+            "schedule_context": list(_SCHEDULE_CONTEXT_GROUP),
+            "market": list(_MARKET_GROUP),
+            "elo": list(_ELO_GROUP),
+            "environment": list(_ENVIRONMENT_GROUP),
+            "game_context": list(_GAME_CONTEXT_GROUP),
         }
 
-    def get_feature_columns(self) -> List[str]:
-        """Get list of all feature column names (~55 features)."""
-        return [col for group in self.get_feature_groups().values() for col in group]
-
     def get_target_column(self) -> str:
-        """Get the target column name."""
+        """Return the target column name."""
         return "upset"

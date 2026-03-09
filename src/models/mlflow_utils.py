@@ -11,14 +11,20 @@ logger = logging.getLogger(__name__)
 class MLflowTracker:
     """MLflow experiment tracker with graceful degradation when unavailable."""
 
-    def __init__(self, experiment_name: str, run_name: Optional[str] = None,
-                 enabled: bool = True, tracking_uri: Optional[str] = None):
+    def __init__(
+        self,
+        experiment_name: str,
+        run_name: Optional[str] = None,
+        enabled: bool = True,
+        tracking_uri: Optional[str] = None,
+    ):
         self.experiment_name, self.run_name = experiment_name, run_name
         self._run, self._mlflow = None, None
         self.enabled = enabled
         if enabled:
             try:
                 import mlflow
+
                 self._mlflow = mlflow
                 if tracking_uri:
                     mlflow.set_tracking_uri(tracking_uri)
@@ -43,7 +49,9 @@ class MLflowTracker:
         if self._active():
             self._mlflow.log_params(params)
 
-    def log_metrics(self, metrics: Dict[str, float], step: Optional[int] = None) -> None:
+    def log_metrics(
+        self, metrics: Dict[str, float], step: Optional[int] = None
+    ) -> None:
         if self._active():
             self._mlflow.log_metrics(metrics, step=step)
 
@@ -63,7 +71,9 @@ class MLflowTracker:
         if self._active():
             self._mlflow.set_tag(key, value)
 
-    def log_model(self, model, artifact_path: str, registered_model_name: Optional[str] = None) -> None:
+    def log_model(
+        self, model, artifact_path: str, registered_model_name: Optional[str] = None
+    ) -> None:
         if not self._active():
             return
         model_type = type(model).__name__
@@ -79,13 +89,22 @@ class MLflowTracker:
         for flavor_name, model_obj in flavors:
             try:
                 flavor = __import__(flavor_name, fromlist=["log_model"])
-                flavor.log_model(model_obj, artifact_path, registered_model_name=registered_model_name)
+                flavor.log_model(
+                    model_obj,
+                    artifact_path,
+                    registered_model_name=registered_model_name,
+                )
                 return
             except Exception as e:
                 logger.debug(f"Could not log model with {flavor_name}: {e}")
 
 
-def create_tracker(experiment_name: str = "nfl-upset-prediction", run_name: Optional[str] = None,
-                   enabled: bool = True) -> MLflowTracker:
+def create_tracker(
+    experiment_name: str = "nfl-upset-prediction",
+    run_name: Optional[str] = None,
+    enabled: bool = True,
+) -> MLflowTracker:
     """Factory function to create an MLflow tracker."""
-    return MLflowTracker(experiment_name=experiment_name, run_name=run_name, enabled=enabled)
+    return MLflowTracker(
+        experiment_name=experiment_name, run_name=run_name, enabled=enabled
+    )

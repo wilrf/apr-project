@@ -79,18 +79,27 @@ class DisagreementAnalyzer:
     def __init__(
         self,
         predictions: List["GamePrediction"],
-        threshold: float = 0.5,
+        threshold: Optional[float] = None,
     ):
         """
         Initialize analyzer with predictions from all three models.
 
         Args:
             predictions: List of GamePrediction objects from UnifiedTrainer
-            threshold: Probability threshold for binary predictions
+            threshold: Probability threshold for binary predictions.
+                If None, uses the base upset rate from the data, so a model
+                "predicts upset" when it assigns higher probability than average.
+                This is the principled choice for minority-class problems.
         """
         self.predictions = predictions
-        self.threshold = threshold
-        self._categories: Optional[Dict[PredictionCategory, List["GamePrediction"]]] = None
+        if threshold is None:
+            base_rate = np.mean([p.y_true for p in predictions]) if predictions else 0.5
+            self.threshold = base_rate
+        else:
+            self.threshold = threshold
+        self._categories: Optional[Dict[PredictionCategory, List["GamePrediction"]]] = (
+            None
+        )
 
     def categorize_all(self) -> Dict[PredictionCategory, List["GamePrediction"]]:
         """
@@ -150,31 +159,37 @@ class DisagreementAnalyzer:
             if not preds:
                 continue
 
-            stats.append(CategoryStats(
-                category=cat,
-                count=len(preds),
-                pct_of_total=len(preds) / total * 100 if total > 0 else 0,
-                upset_rate=np.mean([p.y_true for p in preds]) if preds else 0,
-                avg_spread=np.mean([p.spread_magnitude for p in preds]) if preds else 0,
-                avg_lr_prob=np.mean([p.lr_prob for p in preds]) if preds else 0,
-                avg_xgb_prob=np.mean([p.xgb_prob for p in preds]) if preds else 0,
-                avg_lstm_prob=np.mean([p.lstm_prob for p in preds]) if preds else 0,
-            ))
+            stats.append(
+                CategoryStats(
+                    category=cat,
+                    count=len(preds),
+                    pct_of_total=len(preds) / total * 100 if total > 0 else 0,
+                    upset_rate=np.mean([p.y_true for p in preds]) if preds else 0,
+                    avg_spread=(
+                        np.mean([p.spread_magnitude for p in preds]) if preds else 0
+                    ),
+                    avg_lr_prob=np.mean([p.lr_prob for p in preds]) if preds else 0,
+                    avg_xgb_prob=np.mean([p.xgb_prob for p in preds]) if preds else 0,
+                    avg_lstm_prob=np.mean([p.lstm_prob for p in preds]) if preds else 0,
+                )
+            )
 
         # Convert to DataFrame
-        return pd.DataFrame([
-            {
-                "category": s.category.value,
-                "count": s.count,
-                "pct_of_total": s.pct_of_total,
-                "upset_rate": s.upset_rate,
-                "avg_spread": s.avg_spread,
-                "avg_lr_prob": s.avg_lr_prob,
-                "avg_xgb_prob": s.avg_xgb_prob,
-                "avg_lstm_prob": s.avg_lstm_prob,
-            }
-            for s in stats
-        ])
+        return pd.DataFrame(
+            [
+                {
+                    "category": s.category.value,
+                    "count": s.count,
+                    "pct_of_total": s.pct_of_total,
+                    "upset_rate": s.upset_rate,
+                    "avg_spread": s.avg_spread,
+                    "avg_lr_prob": s.avg_lr_prob,
+                    "avg_xgb_prob": s.avg_xgb_prob,
+                    "avg_lstm_prob": s.avg_lstm_prob,
+                }
+                for s in stats
+            ]
+        )
 
     def get_exclusive_insights(self) -> Dict[PredictionCategory, DisagreementInsight]:
         """
@@ -188,63 +203,45 @@ class DisagreementAnalyzer:
         categories = self.categorize_all()
         insights = {}
 
-        # ONLY_LR: Spread mispricing
-        lr_preds = categories[PredictionCategory.ONLY_LR]
-        if lr_preds:
-            insights[PredictionCategory.ONLY_LR] = DisagreementInsight(
-                category=PredictionCategory.ONLY_LR,
-                description=(
-                    "Games where only LR was correct suggest systematic spread mispricing. "
-                    "The market undervalued certain linear feature combinations."
-                ),
-                key_features={
-                    "avg_spread": np.mean([p.spread_magnitude for p in lr_preds]),
-                    "upset_rate": np.mean([p.y_true for p in lr_preds]),
-                    "avg_lr_confidence": np.mean([
-                        abs(p.lr_prob - 0.5) for p in lr_preds
-                    ]),
-                },
-                example_games=[p.game_id for p in lr_preds[:5]],
-            )
+        exclusive_configs = [
+            (
+                PredictionCategory.ONLY_LR,
+                "lr_prob",
+                "Games where only LR was correct suggest systematic spread mispricing. "
+                "The market undervalued certain linear feature combinations.",
+            ),
+            (
+                PredictionCategory.ONLY_XGB,
+                "xgb_prob",
+                "Games where only XGBoost was correct suggest "
+                "non-linear feature interactions. "
+                "Specific combinations of factors created "
+                "upset conditions.",
+            ),
+            (
+                PredictionCategory.ONLY_LSTM,
+                "lstm_prob",
+                "Games where only LSTM was correct reveal temporal dynamics. "
+                "Recent game sequences (momentum shifts, fatigue patterns) "
+                "provided predictive signal invisible to static models.",
+            ),
+        ]
 
-        # ONLY_XGB: Interaction-driven
-        xgb_preds = categories[PredictionCategory.ONLY_XGB]
-        if xgb_preds:
-            insights[PredictionCategory.ONLY_XGB] = DisagreementInsight(
-                category=PredictionCategory.ONLY_XGB,
-                description=(
-                    "Games where only XGBoost was correct suggest non-linear feature interactions. "
-                    "Specific combinations of factors created upset conditions."
-                ),
-                key_features={
-                    "avg_spread": np.mean([p.spread_magnitude for p in xgb_preds]),
-                    "upset_rate": np.mean([p.y_true for p in xgb_preds]),
-                    "avg_xgb_confidence": np.mean([
-                        abs(p.xgb_prob - 0.5) for p in xgb_preds
-                    ]),
-                },
-                example_games=[p.game_id for p in xgb_preds[:5]],
-            )
-
-        # ONLY_LSTM: Temporal signal (most interesting!)
-        lstm_preds = categories[PredictionCategory.ONLY_LSTM]
-        if lstm_preds:
-            insights[PredictionCategory.ONLY_LSTM] = DisagreementInsight(
-                category=PredictionCategory.ONLY_LSTM,
-                description=(
-                    "Games where only LSTM was correct reveal temporal dynamics. "
-                    "Recent game sequences (momentum shifts, fatigue patterns) "
-                    "provided predictive signal invisible to static models."
-                ),
-                key_features={
-                    "avg_spread": np.mean([p.spread_magnitude for p in lstm_preds]),
-                    "upset_rate": np.mean([p.y_true for p in lstm_preds]),
-                    "avg_lstm_confidence": np.mean([
-                        abs(p.lstm_prob - 0.5) for p in lstm_preds
-                    ]),
-                },
-                example_games=[p.game_id for p in lstm_preds[:5]],
-            )
+        for cat, prob_attr, description in exclusive_configs:
+            preds = categories[cat]
+            if preds:
+                insights[cat] = DisagreementInsight(
+                    category=cat,
+                    description=description,
+                    key_features={
+                        "avg_spread": np.mean([p.spread_magnitude for p in preds]),
+                        "upset_rate": np.mean([p.y_true for p in preds]),
+                        f"avg_{prob_attr.replace('_prob', '')}_confidence": np.mean(
+                            [abs(getattr(p, prob_attr) - 0.5) for p in preds]
+                        ),
+                    },
+                    example_games=[p.game_id for p in preds[:5]],
+                )
 
         return insights
 
@@ -268,10 +265,17 @@ class DisagreementAnalyzer:
         xgb_lstm_agree = (xgb_preds == lstm_preds).mean()
         all_agree = ((lr_preds == xgb_preds) & (xgb_preds == lstm_preds)).mean()
 
-        return pd.DataFrame({
-            "model_pair": ["LR-XGB", "LR-LSTM", "XGB-LSTM", "All Three"],
-            "agreement_rate": [lr_xgb_agree, lr_lstm_agree, xgb_lstm_agree, all_agree],
-        })
+        return pd.DataFrame(
+            {
+                "model_pair": ["LR-XGB", "LR-LSTM", "XGB-LSTM", "All Three"],
+                "agreement_rate": [
+                    lr_xgb_agree,
+                    lr_lstm_agree,
+                    xgb_lstm_agree,
+                    all_agree,
+                ],
+            }
+        )
 
     def get_correlation_matrix(self) -> pd.DataFrame:
         """
@@ -305,33 +309,38 @@ class DisagreementAnalyzer:
         """
         categories = self.categorize_all()
 
+        # Invert: pred -> category (O(n) instead of O(n*k) per row)
+        pred_to_cat = {
+            id(pred): cat.value
+            for cat, preds in categories.items()
+            for pred in preds
+        }
+
         rows = []
         for pred in self.predictions:
-            # Find category for this prediction
-            for cat, preds in categories.items():
-                if pred in preds:
-                    category = cat.value
-                    break
+            category = pred_to_cat.get(id(pred), "unknown")
 
-            rows.append({
-                "game_id": pred.game_id,
-                "season": pred.season,
-                "week": pred.week,
-                "underdog": pred.underdog,
-                "favorite": pred.favorite,
-                "spread_magnitude": pred.spread_magnitude,
-                "y_true": pred.y_true,
-                "lr_prob": pred.lr_prob,
-                "xgb_prob": pred.xgb_prob,
-                "lstm_prob": pred.lstm_prob,
-                "lr_pred": pred.lr_pred,
-                "xgb_pred": pred.xgb_pred,
-                "lstm_pred": pred.lstm_pred,
-                "lr_correct": int(pred.lr_pred == pred.y_true),
-                "xgb_correct": int(pred.xgb_pred == pred.y_true),
-                "lstm_correct": int(pred.lstm_pred == pred.y_true),
-                "category": category,
-            })
+            rows.append(
+                {
+                    "game_id": pred.game_id,
+                    "season": pred.season,
+                    "week": pred.week,
+                    "underdog": pred.underdog,
+                    "favorite": pred.favorite,
+                    "spread_magnitude": pred.spread_magnitude,
+                    "y_true": pred.y_true,
+                    "lr_prob": pred.lr_prob,
+                    "xgb_prob": pred.xgb_prob,
+                    "lstm_prob": pred.lstm_prob,
+                    "lr_pred": pred.lr_pred,
+                    "xgb_pred": pred.xgb_pred,
+                    "lstm_pred": pred.lstm_pred,
+                    "lr_correct": int(pred.lr_pred == pred.y_true),
+                    "xgb_correct": int(pred.xgb_pred == pred.y_true),
+                    "lstm_correct": int(pred.lstm_pred == pred.y_true),
+                    "category": category,
+                }
+            )
 
         df = pd.DataFrame(rows)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -362,23 +371,29 @@ class DisagreementAnalyzer:
 
         # Agreement matrix
         agreement = self.get_agreement_matrix()
-        lines.extend([
-            "\n--- Pairwise Agreement ---\n",
-        ])
+        lines.extend(
+            [
+                "\n--- Pairwise Agreement ---\n",
+            ]
+        )
         for _, row in agreement.iterrows():
             lines.append(f"  {row['model_pair']:12s}: {row['agreement_rate']:.1%}")
 
         # Exclusive insights
         insights = self.get_exclusive_insights()
         if insights:
-            lines.extend([
-                "\n--- Key Findings ---\n",
-            ])
+            lines.extend(
+                [
+                    "\n--- Key Findings ---\n",
+                ]
+            )
             for cat, insight in insights.items():
-                lines.extend([
-                    f"\n{cat.value.upper()}:",
-                    f"  {insight.description[:80]}...",
-                    f"  Examples: {', '.join(insight.example_games[:3])}",
-                ])
+                lines.extend(
+                    [
+                        f"\n{cat.value.upper()}:",
+                        f"  {insight.description[:80]}...",
+                        f"  Examples: {', '.join(insight.example_games[:3])}",
+                    ]
+                )
 
         return "\n".join(lines)

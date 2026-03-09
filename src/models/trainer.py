@@ -12,6 +12,7 @@ from src.models.cv_splitter import TimeSeriesCVSplitter
 
 class Model(Protocol):
     """Protocol for model interface."""
+
     def fit(self, X: pd.DataFrame, y: pd.Series) -> Any: ...
     def predict_proba(self, X: pd.DataFrame) -> np.ndarray: ...
 
@@ -82,11 +83,13 @@ class ModelTrainer:
             metrics["val_size"] = len(val_idx)
 
             fold_metrics.append(metrics)
-            fold_predictions.append({
-                "val_idx": val_idx,
-                "y_true": y_val.values,
-                "y_pred": y_pred_proba,
-            })
+            fold_predictions.append(
+                {
+                    "val_idx": val_idx,
+                    "y_true": y_val.values,
+                    "y_pred": y_pred_proba,
+                }
+            )
 
         # Aggregate metrics
         aggregated = self._aggregate_metrics(fold_metrics)
@@ -109,7 +112,9 @@ class ModelTrainer:
             "brier_score": brier_score_loss(y_true, y_pred_proba),
         }
 
-    def _aggregate_metrics(self, fold_metrics: List[Dict[str, Any]]) -> Dict[str, float]:
+    def _aggregate_metrics(
+        self, fold_metrics: List[Dict[str, Any]]
+    ) -> Dict[str, float]:
         """Aggregate metrics across folds."""
         metric_names = ["auc_roc", "log_loss", "brier_score"]
         aggregated: Dict[str, float] = {}

@@ -11,12 +11,14 @@ class TestUpsetXGBoost:
         """Create sample training data."""
         np.random.seed(42)
         n = 100
-        return pd.DataFrame({
-            "spread_magnitude": np.random.uniform(3, 14, n),
-            "offense_diff": np.random.normal(0, 1, n),
-            "defense_diff": np.random.normal(0, 1, n),
-            "upset": np.random.binomial(1, 0.35, n),
-        })
+        return pd.DataFrame(
+            {
+                "spread_magnitude": np.random.uniform(3, 14, n),
+                "offense_diff": np.random.normal(0, 1, n),
+                "defense_diff": np.random.normal(0, 1, n),
+                "upset": np.random.binomial(1, 0.35, n),
+            }
+        )
 
     def test_fit_returns_self(self, sample_data):
         """Test that fit returns the model instance."""

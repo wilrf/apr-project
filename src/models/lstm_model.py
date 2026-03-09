@@ -14,7 +14,7 @@ class SiameseLSTMDataset(Dataset):
     Dataset for Siamese LSTM model.
 
     Handles:
-    - Separate sequences for underdog and favorite (last 5 games each)
+    - Separate sequences for underdog and favorite (last 8 games each)
     - Matchup-level features
     - Target variable
     """
@@ -62,8 +62,16 @@ class SiameseLSTMDataset(Dataset):
             self.favorite_sequences[idx],
             self.matchup_features[idx],
             self.targets[idx],
-            und_mask if und_mask is not None else torch.ones(self.underdog_sequences.shape[1]),
-            fav_mask if fav_mask is not None else torch.ones(self.favorite_sequences.shape[1]),
+            (
+                und_mask
+                if und_mask is not None
+                else torch.ones(self.underdog_sequences.shape[1])
+            ),
+            (
+                fav_mask
+                if fav_mask is not None
+                else torch.ones(self.favorite_sequences.shape[1])
+            ),
         )
 
 
@@ -72,8 +80,8 @@ class SiameseUpsetLSTM(nn.Module):
     True Siamese LSTM architecture for upset prediction.
 
     Architecture per design spec:
-    - Underdog's last 5 games → Shared LSTM Encoder → Attention → Encoding A
-    - Favorite's last 5 games → Shared LSTM Encoder → Attention → Encoding B
+    - Underdog's last 8 games → Shared LSTM Encoder → Attention → Encoding A
+    - Favorite's last 8 games → Shared LSTM Encoder → Attention → Encoding B
     - Concat(Encoding A, Encoding B, Matchup Features) → Dense → P(upset)
 
     The same LSTM encoder processes both teams' sequences independently,
@@ -82,7 +90,7 @@ class SiameseUpsetLSTM(nn.Module):
 
     def __init__(
         self,
-        sequence_features: int = 4,
+        sequence_features: int = 14,
         matchup_features: int = 10,
         hidden_size: int = 64,
         num_layers: int = 2,
@@ -148,7 +156,9 @@ class SiameseUpsetLSTM(nn.Module):
         lstm_out, _ = self.shared_lstm(sequences)  # (batch, seq_len, hidden)
 
         # Attention weights
-        attn_weights = torch.softmax(self.attention(lstm_out), dim=1)  # (batch, seq_len, 1)
+        attn_weights = torch.softmax(
+            self.attention(lstm_out), dim=1
+        )  # (batch, seq_len, 1)
 
         # Apply mask if provided
         if mask is not None:

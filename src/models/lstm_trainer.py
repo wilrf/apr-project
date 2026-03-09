@@ -2,23 +2,28 @@
 
 from __future__ import annotations
 
+from typing import Any, Dict, List, Optional, Tuple
+
 import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
+from sklearn.metrics import brier_score_loss, log_loss, roc_auc_score
 from torch.utils.data import DataLoader
-from typing import Dict, List, Any, Optional, Tuple
-from sklearn.metrics import roc_auc_score, log_loss, brier_score_loss
 
-from src.models.lstm_model import SiameseUpsetLSTM, SiameseLSTMDataset
-from src.models.sequence_builder import (
-    build_siamese_sequences,
-    SiameseLSTMData,
-    NormalizationStats,
-    SEQUENCE_FEATURES,
-    MATCHUP_FEATURES,
-)
 from src.models.cv_splitter import TimeSeriesCVSplitter
+from src.models.lstm_config import (
+    TUNED_LSTM_MODEL_PARAMS,
+    TUNED_LSTM_TRAINING_PARAMS,
+)
+from src.models.lstm_model import SiameseLSTMDataset, SiameseUpsetLSTM
+from src.models.sequence_builder import (
+    MATCHUP_FEATURES,
+    SEQUENCE_FEATURES,
+    NormalizationStats,
+    SiameseLSTMData,
+    build_siamese_sequences,
+)
 
 
 class SiameseLSTMTrainer:
@@ -35,13 +40,13 @@ class SiameseLSTMTrainer:
 
     def __init__(
         self,
-        hidden_size: int = 64,
-        num_layers: int = 2,
-        dropout: float = 0.3,
-        learning_rate: float = 0.001,
-        batch_size: int = 32,
-        epochs: int = 100,
-        patience: int = 10,
+        hidden_size: int = int(TUNED_LSTM_MODEL_PARAMS["hidden_size"]),
+        num_layers: int = int(TUNED_LSTM_MODEL_PARAMS["num_layers"]),
+        dropout: float = float(TUNED_LSTM_MODEL_PARAMS["dropout"]),
+        learning_rate: float = float(TUNED_LSTM_TRAINING_PARAMS["learning_rate"]),
+        batch_size: int = int(TUNED_LSTM_TRAINING_PARAMS["batch_size"]),
+        epochs: int = int(TUNED_LSTM_TRAINING_PARAMS["epochs"]),
+        patience: int = int(TUNED_LSTM_TRAINING_PARAMS["patience"]),
         n_folds: int = 6,
         device: Optional[str] = None,
     ):
@@ -220,7 +225,9 @@ class SiameseLSTMTrainer:
             # Early stopping check
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
-                best_model_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
+                best_model_state = {
+                    k: v.cpu().clone() for k, v in model.state_dict().items()
+                }
                 patience_counter = 0
             else:
                 patience_counter += 1
@@ -309,12 +316,14 @@ class SiameseLSTMTrainer:
             metrics["epochs_trained"] = history["epochs_trained"]
 
             fold_metrics.append(metrics)
-            fold_predictions.append({
-                "val_idx": val_idx,
-                "y_true": y_true,
-                "y_pred": y_pred,
-                "game_ids": val_data.game_ids,
-            })
+            fold_predictions.append(
+                {
+                    "val_idx": val_idx,
+                    "y_true": y_true,
+                    "y_pred": y_pred,
+                    "game_ids": val_data.game_ids,
+                }
+            )
 
         # Aggregate metrics
         aggregated = self._aggregate_metrics(fold_metrics)
@@ -405,9 +414,7 @@ class SiameseLSTMTrainer:
 
         return predictions
 
-    def get_attention_weights(
-        self, df: pd.DataFrame
-    ) -> Tuple[np.ndarray, np.ndarray]:
+    def get_attention_weights(self, df: pd.DataFrame) -> Tuple[np.ndarray, np.ndarray]:
         """
         Get attention weights for interpretability.
 

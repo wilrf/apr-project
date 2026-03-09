@@ -11,12 +11,14 @@ class TestUpsetLogisticRegression:
         """Create sample training data."""
         np.random.seed(42)
         n = 100
-        return pd.DataFrame({
-            "spread_magnitude": np.random.uniform(3, 14, n),
-            "offense_diff": np.random.normal(0, 1, n),
-            "defense_diff": np.random.normal(0, 1, n),
-            "upset": np.random.binomial(1, 0.35, n),
-        })
+        return pd.DataFrame(
+            {
+                "spread_magnitude": np.random.uniform(3, 14, n),
+                "offense_diff": np.random.normal(0, 1, n),
+                "defense_diff": np.random.normal(0, 1, n),
+                "upset": np.random.binomial(1, 0.35, n),
+            }
+        )
 
     def test_fit_returns_self(self, sample_data):
         """Test that fit returns the model instance."""
@@ -120,11 +122,13 @@ class TestUpsetLogisticRegression:
         noise1 = np.random.normal(0, 0.1, n)
         noise2 = np.random.normal(0, 0.1, n)
 
-        X = pd.DataFrame({
-            "signal": signal,
-            "noise1": noise1,
-            "noise2": noise2,
-        })
+        X = pd.DataFrame(
+            {
+                "signal": signal,
+                "noise1": noise1,
+                "noise2": noise2,
+            }
+        )
         # Target strongly correlated with signal
         y = pd.Series((signal + np.random.normal(0, 0.3, n) > 0).astype(int))
 

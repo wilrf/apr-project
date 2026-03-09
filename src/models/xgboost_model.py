@@ -71,7 +71,8 @@ class UpsetXGBoost:
         self.feature_names = list(X.columns)
         self.model = xgb.XGBClassifier(**self.params)
         self.model.fit(
-            X, y,
+            X,
+            y,
             eval_set=eval_set,
             verbose=verbose,
         )
@@ -122,7 +123,4 @@ class UpsetXGBoost:
 
         # Map back to feature names
         # When fitted with DataFrame, get_score() uses actual feature names as keys
-        return {
-            name: importance.get(name, 0.0)
-            for name in self.feature_names
-        }
+        return {name: importance.get(name, 0.0) for name in self.feature_names}

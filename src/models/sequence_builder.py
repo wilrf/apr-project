@@ -1,15 +1,22 @@
 """Sequence builder for Siamese LSTM model.
 
-Converts DataFrame to separate team game history sequences for the siamese LSTM architecture.
+Converts DataFrame to separate team game history sequences for the
+siamese LSTM architecture.
 Each team's sequence is processed independently through the shared encoder.
 """
 
 from __future__ import annotations
 
-import pandas as pd
-import numpy as np
-from typing import Tuple, Dict, List, Optional
 from dataclasses import dataclass
+from typing import Dict, List, Optional, Tuple
+
+import numpy as np
+import pandas as pd
+
+from src.features.pipeline import (
+    LSTM_MATCHUP_FEATURES,
+    LSTM_MATCHUP_FEATURES_NO_SPREAD,
+)
 
 
 @dataclass
@@ -20,29 +27,34 @@ class NormalizationStats:
     matchup_stats: Dict[str, Tuple[float, float]]  # feature -> (mean, std)
 
 
-# Per-game features for sequence (what we track about each historical game)
+# Expanded sequence: 14 features per game per team.
+# The LSTM learns rolling patterns, trends, and momentum from raw game-by-game data.
+# No pre-computed rolling averages — the sequence IS the raw temporal data.
 SEQUENCE_FEATURES = [
-    "points_scored",
+    "total_epa",  # offensive efficiency
+    "pass_epa",
+    "rush_epa",
+    "success_rate",
+    "cpoe",
+    "turnover_margin",
+    "points_scored",  # score context
     "points_allowed",
-    "point_diff",
-    "win",
-]
+    "point_diff",  # net outcome (margin)
+    "opponent_elo",  # quality of competition
+    "win",  # binary outcome
+    "was_home",  # venue
+    "days_since_last_game",  # schedule
+    "short_week",  # schedule flag
+]  # 14 features
 
-# Matchup-level features (describe THIS specific game being predicted)
-MATCHUP_FEATURES = [
-    "spread_magnitude",
-    "home_indicator",
-    "divisional_game",
-    "rest_advantage",
-    "week_number",
-    "primetime_game",
-    "is_dome",
-    "cold_weather",
-    "windy_game",
-    "over_under_normalized",
-]
+SEQUENCE_FEATURES_NO_SPREAD = SEQUENCE_FEATURES.copy()
 
-SEQUENCE_LENGTH = 5
+# Minimal matchup context: only things the sequence CAN'T know.
+MATCHUP_FEATURES = LSTM_MATCHUP_FEATURES.copy()  # 10
+MATCHUP_FEATURES_NO_SPREAD = LSTM_MATCHUP_FEATURES_NO_SPREAD.copy()  # 8
+
+# 8-game lookback: more temporal context for trend detection
+SEQUENCE_LENGTH = 8
 
 
 @dataclass
@@ -83,8 +95,10 @@ class SiameseLSTMData:
         return self.matchup_features.shape[1]
 
 
-# Backward compatibility alias
-LSTMSequenceData = SiameseLSTMData
+def _safe_float(row: pd.Series, key: str) -> float:
+    """Extract a float from a row, returning NaN for missing values."""
+    val = row.get(key, np.nan)
+    return float(val) if pd.notna(val) else np.nan
 
 
 def _build_team_game_history(df: pd.DataFrame) -> Dict[Tuple[str, int], pd.DataFrame]:
@@ -104,7 +118,6 @@ def _build_team_game_history(df: pd.DataFrame) -> Dict[Tuple[str, int], pd.DataF
         week = row["week"]
         home_team = row["home_team"]
         away_team = row["away_team"]
-
         # Get scores
         home_score = row.get("home_score", row.get("score_home", np.nan))
         away_score = row.get("away_score", row.get("score_away", np.nan))
@@ -112,29 +125,101 @@ def _build_team_game_history(df: pd.DataFrame) -> Dict[Tuple[str, int], pd.DataF
         if pd.isna(home_score) or pd.isna(away_score):
             continue
 
-        # Record for home team
-        home_key = (home_team, season)
-        if home_key not in history:
-            history[home_key] = []
-        history[home_key].append({
-            "week": week,
-            "points_scored": float(home_score),
-            "points_allowed": float(away_score),
-            "point_diff": float(home_score - away_score),
-            "win": 1.0 if home_score > away_score else 0.0,
-        })
+        home_rest = row.get("home_rest", 7.0)
+        away_rest = row.get("away_rest", 7.0)
+        home_rest = 7.0 if pd.isna(home_rest) else float(home_rest)
+        away_rest = 7.0 if pd.isna(away_rest) else float(away_rest)
 
-        # Record for away team
-        away_key = (away_team, season)
-        if away_key not in history:
-            history[away_key] = []
-        history[away_key].append({
-            "week": week,
-            "points_scored": float(away_score),
-            "points_allowed": float(home_score),
-            "point_diff": float(away_score - home_score),
-            "win": 1.0 if away_score > home_score else 0.0,
-        })
+        # EPA and stat fields (graceful when missing)
+        epa = {
+            col: _safe_float(row, col)
+            for col in [
+                "home_off_pass_epa",
+                "home_off_rush_epa",
+                "away_off_pass_epa",
+                "away_off_rush_epa",
+                "home_success_rate",
+                "away_success_rate",
+                "home_cpoe",
+                "away_cpoe",
+                "home_turnover_margin",
+                "away_turnover_margin",
+            ]
+        }
+
+        def _sum_if_any(a: float, b: float) -> float:
+            valid = [v for v in (a, b) if pd.notna(v)]
+            return float(sum(valid)) if valid else np.nan
+
+        # Build records for both teams with perspective swap
+        perspectives = [
+            (
+                home_team,
+                away_team,
+                home_score,
+                away_score,
+                1.0,
+                home_rest,
+                "home",
+                "away",
+            ),
+            (
+                away_team,
+                home_team,
+                away_score,
+                home_score,
+                0.0,
+                away_rest,
+                "away",
+                "home",
+            ),
+        ]
+        for (
+            team,
+            opp,
+            scored,
+            allowed,
+            is_home,
+            rest,
+            prefix,
+            opp_prefix,
+        ) in perspectives:
+            pass_epa = epa[f"{prefix}_off_pass_epa"]
+            rush_epa = epa[f"{prefix}_off_rush_epa"]
+
+            # Opponent Elo (from pre-game ratings merged by pipeline)
+            opp_elo_val = row.get(f"{opp_prefix}_elo_pre", 1500.0)
+            opponent_elo = (
+                float(opp_elo_val) if pd.notna(opp_elo_val) else 1500.0
+            )
+
+            key = (team, season)
+            if key not in history:
+                history[key] = []
+            history[key].append(
+                {
+                    "week": week,
+                    "points_scored": float(scored),
+                    "points_allowed": float(allowed),
+                    "point_diff": float(scored - allowed),
+                    "win": 1.0 if scored > allowed else 0.0,
+                    "was_home": is_home,
+                    "rest_days": rest,
+                    "days_since_last_game": rest,
+                    "short_week": 1.0 if rest <= 5.0 else 0.0,
+                    "opponent_elo": opponent_elo,
+                    "off_pass_epa": pass_epa,
+                    "off_rush_epa": rush_epa,
+                    "def_pass_epa": epa[f"{opp_prefix}_off_pass_epa"],
+                    "def_rush_epa": epa[f"{opp_prefix}_off_rush_epa"],
+                    "pass_epa": pass_epa,
+                    "rush_epa": rush_epa,
+                    "total_epa": _sum_if_any(pass_epa, rush_epa),
+                    "success_rate": epa[f"{prefix}_success_rate"],
+                    "cpoe": epa[f"{prefix}_cpoe"],
+                    "turnover_margin": epa[f"{prefix}_turnover_margin"],
+                }
+            )
 
     # Convert to DataFrames sorted by week
     result = {}
@@ -151,6 +236,7 @@ def _get_team_sequence(
     week: int,
     team_history: Dict[Tuple[str, int], pd.DataFrame],
     seq_length: int = SEQUENCE_LENGTH,
+    sequence_features: Optional[List[str]] = None,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
     Get the last N games for a team prior to a given week.
@@ -167,7 +253,10 @@ def _get_team_sequence(
         - sequence: shape (seq_length, n_features)
         - mask: shape (seq_length,) with 1 for valid games, 0 for padding
     """
-    n_features = len(SEQUENCE_FEATURES)
+    active_sequence_features = (
+        sequence_features if sequence_features is not None else SEQUENCE_FEATURES
+    )
+    n_features = len(active_sequence_features)
     sequence = np.zeros((seq_length, n_features))
     mask = np.zeros(seq_length)
 
@@ -193,8 +282,9 @@ def _get_team_sequence(
 
     for i, (_, game) in enumerate(recent_games.iterrows()):
         idx = start_idx + i
-        for j, feat in enumerate(SEQUENCE_FEATURES):
-            sequence[idx, j] = game[feat]
+        for j, feat in enumerate(active_sequence_features):
+            value = game[feat]
+            sequence[idx, j] = 0.0 if pd.isna(value) else float(value)
         mask[idx] = 1.0
 
     return sequence, mask
@@ -203,6 +293,7 @@ def _get_team_sequence(
 def _normalize_sequences(
     sequences: np.ndarray,
     masks: np.ndarray,
+    feature_names: List[str],
     stats: Optional[Dict[str, Tuple[float, float]]] = None,
 ) -> Tuple[np.ndarray, Dict[str, Tuple[float, float]]]:
     """
@@ -217,11 +308,15 @@ def _normalize_sequences(
         Tuple of (normalized sequences, stats dict)
     """
     n_features = sequences.shape[2]
+    if len(feature_names) != n_features:
+        raise ValueError(
+            f"Expected {n_features} sequence feature names, got {len(feature_names)}"
+        )
     normalized = sequences.copy()
     computed_stats: Dict[str, Tuple[float, float]] = {}
 
     for f in range(n_features):
-        feature_name = SEQUENCE_FEATURES[f] if f < len(SEQUENCE_FEATURES) else f"feat_{f}"
+        feature_name = feature_names[f]
         feature_vals = sequences[:, :, f]
 
         if stats is not None and feature_name in stats:
@@ -244,19 +339,27 @@ def _normalize_sequences(
     return normalized, computed_stats
 
 
-def _extract_matchup_features(df: pd.DataFrame) -> np.ndarray:
+def _extract_matchup_features(
+    df: pd.DataFrame,
+    matchup_feature_cols: Optional[List[str]] = None,
+) -> np.ndarray:
     """
     Extract matchup-level features for each game.
 
     Args:
         df: DataFrame with engineered features
+        matchup_feature_cols: Optional list of matchup feature names.
+            Defaults to MATCHUP_FEATURES (10 LSTM matchup features).
 
     Returns:
         Array of shape (n_samples, n_matchup_features)
     """
+    feat_list = (
+        matchup_feature_cols if matchup_feature_cols is not None else MATCHUP_FEATURES
+    )
     features = []
 
-    for feat in MATCHUP_FEATURES:
+    for feat in feat_list:
         if feat in df.columns:
             features.append(df[feat].fillna(0).values)
         else:
@@ -270,6 +373,8 @@ def build_siamese_sequences(
     normalize: bool = True,
     seq_length: int = SEQUENCE_LENGTH,
     stats: Optional[NormalizationStats] = None,
+    matchup_feature_cols: Optional[List[str]] = None,
+    sequence_feature_cols: Optional[List[str]] = None,
 ) -> Tuple[SiameseLSTMData, Optional[NormalizationStats]]:
     """
     Build Siamese LSTM-ready sequences from game data.
@@ -288,6 +393,10 @@ def build_siamese_sequences(
         stats: Optional pre-computed normalization stats (from training data).
                If None and normalize=True, stats will be computed from this data.
                If provided and normalize=True, provided stats will be applied.
+        matchup_feature_cols: Optional list of matchup feature names.
+            Defaults to None which uses MATCHUP_FEATURES.
+        sequence_feature_cols: Optional list of per-game sequence feature names.
+            Defaults to None which uses SEQUENCE_FEATURES.
 
     Returns:
         Tuple of (SiameseLSTMData, NormalizationStats or None).
@@ -303,7 +412,12 @@ def build_siamese_sequences(
     team_history = _build_team_game_history(df)
 
     n_samples = len(valid_df)
-    n_seq_features = len(SEQUENCE_FEATURES)
+    active_sequence_features = (
+        sequence_feature_cols
+        if sequence_feature_cols is not None
+        else SEQUENCE_FEATURES
+    )
+    n_seq_features = len(active_sequence_features)
 
     # Initialize SEPARATE arrays for each team
     underdog_sequences = np.zeros((n_samples, seq_length, n_seq_features))
@@ -319,7 +433,9 @@ def build_siamese_sequences(
         underdog = row.get("underdog")
         favorite = row.get("favorite")
 
-        game_id = row.get("game_id", f"{season}_{week}_{row['home_team']}_{row['away_team']}")
+        game_id = row.get(
+            "game_id", f"{season}_{week}_{row['home_team']}_{row['away_team']}"
+        )
         game_ids.append(game_id)
 
         if pd.isna(underdog) or pd.isna(favorite):
@@ -327,10 +443,20 @@ def build_siamese_sequences(
 
         # Get SEPARATE sequences for each team
         underdog_sequences[i], underdog_masks[i] = _get_team_sequence(
-            underdog, season, week, team_history, seq_length
+            underdog,
+            season,
+            week,
+            team_history,
+            seq_length,
+            sequence_features=active_sequence_features,
         )
         favorite_sequences[i], favorite_masks[i] = _get_team_sequence(
-            favorite, season, week, team_history, seq_length
+            favorite,
+            season,
+            week,
+            team_history,
+            seq_length,
+            sequence_features=active_sequence_features,
         )
 
     # Normalize sequences (separately for each team, using combined stats)
@@ -338,29 +464,44 @@ def build_siamese_sequences(
     if normalize:
         if stats is None:
             # TRAINING: Compute stats from this data
-            all_sequences = np.concatenate([underdog_sequences, favorite_sequences], axis=0)
+            all_sequences = np.concatenate(
+                [underdog_sequences, favorite_sequences], axis=0
+            )
             all_masks = np.concatenate([underdog_masks, favorite_masks], axis=0)
-            _, sequence_stats = _normalize_sequences(all_sequences, all_masks)
+            _, sequence_stats = _normalize_sequences(
+                all_sequences,
+                all_masks,
+                feature_names=active_sequence_features,
+            )
         else:
             # VALIDATION/TEST: Use provided stats
             sequence_stats = stats.sequence_stats
 
         # Apply stats to both team sequences
         underdog_sequences, _ = _normalize_sequences(
-            underdog_sequences, underdog_masks, sequence_stats
+            underdog_sequences,
+            underdog_masks,
+            feature_names=active_sequence_features,
+            stats=sequence_stats,
         )
         favorite_sequences, _ = _normalize_sequences(
-            favorite_sequences, favorite_masks, sequence_stats
+            favorite_sequences,
+            favorite_masks,
+            feature_names=active_sequence_features,
+            stats=sequence_stats,
         )
 
     # Extract matchup features
-    matchup_features = _extract_matchup_features(valid_df)
+    active_matchup_features = (
+        matchup_feature_cols if matchup_feature_cols is not None else MATCHUP_FEATURES
+    )
+    matchup_features = _extract_matchup_features(valid_df, matchup_feature_cols)
 
     # Normalize matchup features
     matchup_stats: Optional[Dict[str, Tuple[float, float]]] = None
     if normalize:
         matchup_stats = {}
-        for f, feat_name in enumerate(MATCHUP_FEATURES):
+        for f, feat_name in enumerate(active_matchup_features):
             col = matchup_features[:, f]
 
             if stats is None:
@@ -379,7 +520,12 @@ def build_siamese_sequences(
 
     # Build computed stats (only when training, i.e., stats=None and normalize=True)
     computed_stats: Optional[NormalizationStats] = None
-    if normalize and stats is None and sequence_stats is not None and matchup_stats is not None:
+    if (
+        normalize
+        and stats is None
+        and sequence_stats is not None
+        and matchup_stats is not None
+    ):
         computed_stats = NormalizationStats(
             sequence_stats=sequence_stats,
             matchup_stats=matchup_stats,
@@ -397,10 +543,6 @@ def build_siamese_sequences(
         ),
         computed_stats,
     )
-
-
-# Backward compatibility alias
-build_lstm_sequences = build_siamese_sequences
 
 
 def get_sequence_feature_names() -> List[str]:

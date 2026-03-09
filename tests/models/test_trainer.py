@@ -12,13 +12,15 @@ class TestModelTrainer:
         """Create sample training data."""
         np.random.seed(42)
         n = 200
-        return pd.DataFrame({
-            "season": [2020] * 50 + [2021] * 50 + [2022] * 50 + [2023] * 50,
-            "spread_magnitude": np.random.uniform(3, 14, n),
-            "offense_diff": np.random.normal(0, 1, n),
-            "defense_diff": np.random.normal(0, 1, n),
-            "upset": np.random.binomial(1, 0.35, n),
-        })
+        return pd.DataFrame(
+            {
+                "season": [2020] * 50 + [2021] * 50 + [2022] * 50 + [2023] * 50,
+                "spread_magnitude": np.random.uniform(3, 14, n),
+                "offense_diff": np.random.normal(0, 1, n),
+                "defense_diff": np.random.normal(0, 1, n),
+                "upset": np.random.binomial(1, 0.35, n),
+            }
+        )
 
     def test_trainer_runs_cross_validation(self, sample_data):
         """Test that trainer runs all CV folds."""

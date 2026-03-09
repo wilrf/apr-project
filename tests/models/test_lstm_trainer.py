@@ -1,11 +1,11 @@
 # tests/models/test_lstm_trainer.py
 """Tests for Siamese LSTM trainer."""
-import pytest
-import pandas as pd
 import numpy as np
+import pandas as pd
+import pytest
 import torch
+
 from src.models.lstm_trainer import SiameseLSTMTrainer
-from src.models.sequence_builder import SiameseLSTMData
 
 
 @pytest.fixture
@@ -27,39 +27,71 @@ def sample_training_data():
                 home_score = np.random.randint(14, 35)
                 away_score = np.random.randint(14, 35)
 
-                # Determine favorite (higher historical performance gets favorable spread)
+                # Pick a favorite so the sequence-builder path has both roles.
                 spread = np.random.choice([-7, -6, -5, -4, -3, 3, 4, 5, 6, 7])
                 if spread < 0:
                     favorite, underdog = home, away
                 else:
                     favorite, underdog = away, home
 
-                upset = 1 if (underdog == home and home_score > away_score) or \
-                             (underdog == away and away_score > home_score) else 0
+                upset = (
+                    1
+                    if (underdog == home and home_score > away_score)
+                    or (underdog == away and away_score > home_score)
+                    else 0
+                )
 
-                games.append({
-                    "game_id": f"{season}_{week}_{home}_{away}",
-                    "season": season,
-                    "week": week,
-                    "home_team": home,
-                    "away_team": away,
-                    "home_score": home_score,
-                    "away_score": away_score,
-                    "spread_favorite": abs(spread),
-                    "underdog": underdog,
-                    "favorite": favorite,
-                    "upset": upset,
-                    "spread_magnitude": abs(spread),
-                    "home_indicator": 1 if underdog == home else 0,
-                    "divisional_game": np.random.choice([0, 1]),
-                    "rest_advantage": np.random.choice([-1, 0, 1]),
-                    "week_number": week / 18.0,
-                    "primetime_game": np.random.choice([0, 1]),
-                    "is_dome": np.random.choice([0, 1]),
-                    "cold_weather": np.random.choice([0, 1]),
-                    "windy_game": np.random.choice([0, 1]),
-                    "over_under_normalized": np.random.uniform(-0.5, 0.5),
-                })
+                games.append(
+                    {
+                        "game_id": f"{season}_{week}_{home}_{away}",
+                        "season": season,
+                        "week": week,
+                        "home_team": home,
+                        "away_team": away,
+                        "home_score": home_score,
+                        "away_score": away_score,
+                        "spread_favorite": abs(spread),
+                        "underdog": underdog,
+                        "favorite": favorite,
+                        "upset": upset,
+                        "spread_magnitude": abs(spread),
+                        "underdog_is_home": 1 if underdog == home else 0,
+                        "divisional_game": np.random.choice([0, 1]),
+                        "underdog_rest_days": np.random.choice([4, 6, 7, 8, 10]),
+                        "favorite_rest_days": np.random.choice([4, 6, 7, 8, 10]),
+                        "rest_days_diff": np.random.choice([-3, -1, 0, 1, 3]),
+                        "short_week_game": np.random.choice([0, 1]),
+                        "week_number": float(week),
+                        "home_implied_points": np.random.uniform(17, 31),
+                        "away_implied_points": np.random.uniform(14, 28),
+                        "total_line": np.random.uniform(38, 55),
+                        "underdog_elo": np.random.uniform(1400, 1550),
+                        "favorite_elo": np.random.uniform(1450, 1600),
+                        "elo_diff": np.random.uniform(-125, -10),
+                        "temperature": np.random.uniform(25, 80),
+                        "wind_speed": np.random.uniform(0, 20),
+                        "is_dome": np.random.choice([0, 1]),
+                        "temperature_missing": 0,
+                        "wind_speed_missing": 0,
+                        "home_rest": np.random.choice([4, 6, 7, 8, 10]),
+                        "away_rest": np.random.choice([4, 6, 7, 8, 10]),
+                        "home_off_pass_epa": np.random.normal(8, 4),
+                        "home_off_rush_epa": np.random.normal(2, 2),
+                        "away_off_pass_epa": np.random.normal(8, 4),
+                        "away_off_rush_epa": np.random.normal(2, 2),
+                        "home_success_rate": np.random.uniform(0.35, 0.55),
+                        "away_success_rate": np.random.uniform(0.35, 0.55),
+                        "home_cpoe": np.random.normal(0, 3),
+                        "away_cpoe": np.random.normal(0, 3),
+                        "home_turnover_margin": np.random.randint(-3, 4),
+                        "away_turnover_margin": np.random.randint(-3, 4),
+                        "pass_epa_diff": np.random.normal(0, 3),
+                        "rush_epa_diff": np.random.normal(0, 2),
+                        "success_rate_diff": np.random.normal(0, 0.05),
+                        "cpoe_diff": np.random.normal(0, 3),
+                        "turnover_margin_diff": np.random.randint(-3, 4),
+                    }
+                )
 
     return pd.DataFrame(games)
 
@@ -221,9 +253,9 @@ class TestSiameseLSTMTrainerAttention:
 
         n_samples = len(test_data[test_data["upset"].notna()])
         assert und_attn.shape[0] == n_samples
-        assert und_attn.shape[1] == 5  # SEQUENCE_LENGTH
+        assert und_attn.shape[1] == 8  # SEQUENCE_LENGTH
         assert fav_attn.shape[0] == n_samples
-        assert fav_attn.shape[1] == 5  # SEQUENCE_LENGTH
+        assert fav_attn.shape[1] == 8  # SEQUENCE_LENGTH
 
     def test_attention_weights_before_fit_raises_error(self, sample_training_data):
         """Test that getting attention before training raises error."""

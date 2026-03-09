@@ -1,95 +1,86 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Canonical repo instructions and document nomenclature live in [`AGENTS.md`](AGENTS.md).
 
-## Project Overview
+## Deep Context — Read Before Non-Trivial Changes
 
-Research project using **Logistic Regression, XGBoost, and LSTM** as diagnostic tools to understand NFL upset mechanisms. Each model captures different structural aspects:
-- **LR**: Spread mispricing (linear market inefficiencies)
-- **XGBoost**: Feature interactions (non-linear patterns)
-- **LSTM**: Temporal dynamics (momentum, fatigue, sequences)
+- [`docs/architecture-and-analysis.md`](docs/architecture-and-analysis.md) — Full system reference: pipeline, features, models, evaluation, current results. **Read this before modifying any module.**
+- [`docs/paper-framing-notes.md`](docs/paper-framing-notes.md) — Paper framing, positioning, key citations.
+- [`results/test/report.md`](results/test/report.md) — March 2026 test set results (558 games).
 
-The research question is: "What do the differing predictive structures reveal about upset mechanisms?" rather than "which model is best?"
+## Non-Obvious Invariants
 
-**Current Status:** Infrastructure complete, ready for unified multi-model training and evaluation.
+These cause bugs if violated:
 
-## Commands
+- **Spread threshold**: Only `spread >= 3` games get labeled. Sub-3 games keep `upset = NaN`, excluded via `upset.notna()`.
+- **Feature counts are canonical**: LR=46, XGB=70 (46+24 lags), LSTM=14seq×8ts+10matchup. Column lists live as constants in `pipeline.py` — import them, never hardcode.
+- **Disagreement threshold**: Uses base upset rate (~0.30), NOT 0.5.
+- **LSTM normalization**: Stats from training data only. Both teams share stats; normalization applied separately; padded positions zeroed after.
+- **No week-1 games** in labeled data (no prior stats exist for rolling features).
+- **Rolling window crosses seasons** by design (3-game window carries over).
+- **Pre-March-2026 metrics are stale**: Old ~21% upset rate numbers are historical only.
+- Do not edit `.claude/settings.local.json` for repo-wide policy changes.
+
+## Change-Impact Map
+
+When you modify a module, also review its downstream consumers:
+
+```
+pipeline.py (columns/lists)     → sequence_builder, target, generate_features,
+                                   evaluate_test_set, run_ab_experiment
+sequence_builder.py             → lstm_trainer, unified_trainer,
+                                   evaluate_test_set, run_ab_experiment
+lstm_model.py (architecture)    → lstm_trainer, unified_trainer
+lstm_config.py (hyperparams)    → lstm_trainer, unified_trainer,
+                                   evaluate_test_set, run_ab_experiment
+unified_trainer.py              → evaluate_test_set, run_ab_experiment
+cv_splitter.py                  → trainer, lstm_trainer, unified_trainer,
+                                   run_ab_experiment
+disagreement.py                 → evaluate_test_set, run_ab_experiment
+calibration.py                  → evaluate_test_set
+merger.py (column output)       → generate_features, verify_data, pipeline.py
+betting_loader.py (team abbrs)  → merger, generate_features, verify_data
+logistic_model.py (interface)   → unified_trainer, run_ab_experiment
+xgboost_model.py (interface)    → unified_trainer, run_ab_experiment,
+                                   shap_analysis
+metrics.py                      → evaluate_test_set
+```
+
+## Coding Conventions
+
+- **Model interface**: All models expose `fit(X, y)` and `predict_proba(X) → np.ndarray` (1D P(upset)).
+- **Feature column lists**: Canonical lists are module-level constants in `pipeline.py`. Always import; never duplicate.
+- **No-spread variants**: Drop 4 market features (LR/XGB) or 2 (LSTM matchup). Lists also in `pipeline.py`.
+- **Tests mirror src/**: `tests/data/`, `tests/features/`, `tests/models/`, `tests/evaluation/`.
+- **Validation**: `generate_features.py` runs 8 checks per split. New features must pass all 8.
+- **Typing**: Use `from __future__ import annotations` in all modules.
+
+## Data Splits
+
+- Train: 2005–2022 (3,495 labeled), Test: 2023–2025 (558 labeled), upset rate ~30% both.
+
+## Environment Setup
 
 ```bash
-# Run all tests (in batches due to PyTorch/pytest interaction)
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt        # includes PyTorch for LSTM
+python3 -m src.data.generate_features  # regenerate train.csv + test.csv
+```
+
+## Common Commands
+
+```bash
+# Tests — LSTM tests are slow (~30s), separated by default
 python3 -m pytest tests/ --ignore=tests/models/test_lstm_model.py -v
 python3 -m pytest tests/models/test_lstm_model.py -v
-
-# Run specific test file
 python3 -m pytest tests/models/test_cv_splitter.py -v
 
-# Run tests with coverage
-python3 -m pytest --cov=src
-
-# Format code
+# Lint
 black src/ tests/
-ruff check src/ tests/
+python3 -m ruff check src/ tests/
+
+# Run pipeline
+python3 -m src.data.generate_features
+python3 -m src.models.evaluate_test_set
+python3 -m src.models.run_ab_experiment --quick
 ```
-
-## Architecture
-
-### Data Flow
-```
-nfl_data_py + Kaggle CSV → src/data/ → src/features/pipeline.py → src/models/ → src/evaluation/
-```
-
-### Key Modules
-
-**`src/data/`** - Data ingestion
-- `nfl_loader.py`: Fetches from nflverse (schedules)
-- `betting_loader.py`: Loads Kaggle CSV, normalizes team abbreviations
-- `merger.py`: Joins NFL + betting data on season/week/team
-
-**`src/features/`** - Feature engineering (61 features)
-- `pipeline.py`: Main pipeline with rolling stats, matchup differentials, interactions
-- `target.py`: Binary upset target (underdog wins, spread ≥ +3)
-
-**`src/models/`** - Model implementations
-- `logistic_model.py`: L1-regularized logistic regression (spread mispricing detector)
-- `xgboost_model.py`: XGBoost wrapper with SHAP support (interaction detector)
-- `lstm_model.py`: PyTorch siamese LSTM with attention (temporal pattern detector)
-- `cv_splitter.py`: Time-series cross-validation (6 folds)
-- `trainer.py`: Single-model training pipeline with CV and metrics
-- `unified_trainer.py`: Multi-model training pipeline (trains all 3 on identical folds)
-
-**`src/evaluation/`** - Analysis and reporting
-- `metrics.py`: AUC, Brier, calibration (ECE), betting ROI
-- `comparison.py`: Multi-model comparison utilities with agreement matrix
-- `disagreement.py`: Categorizes predictions by model agreement patterns (8 categories)
-- `shap_analysis.py`: SHAP explanations for XGBoost
-- `report.py`: Generates comparison reports with disagreement analysis
-
-### Data Directory
-```
-data/
-├── raw/spreadspoke_scores.csv   # Kaggle betting data (gitignored)
-└── features/                     # Generated datasets (gitignored)
-    ├── train.csv                 # 2005-2022 (4,346 games, 3,497 upset candidates)
-    ├── test.csv                  # 2023-2025 (768 games, 559 upset candidates)
-    └── columns.csv               # 61 feature names
-```
-
-## Data Split
-
-- **Training:** 2005-2022 (18 seasons)
-- **Test:** 2023-2025 (3 seasons, out-of-sample)
-- **CV:** 6-fold time-series (validation years 2017-2022)
-
-## Key Constraints
-
-1. **Temporal integrity**: Never use future data. All rolling stats use `shift(1)`.
-2. **Week 1 exclusion**: Teams need ≥1 prior game for predictions.
-3. **Underdog threshold**: Spread ≥ +3 to qualify as underdog.
-4. **Regular season only**: Playoffs excluded.
-
-## Key Documents
-
-- `docs/plans/2026-01-16-nfl-upset-xgboost-lstm-design.md` - Authoritative spec (multi-model diagnostics)
-- `docs/plans/2026-02-05-research-pivot.md` - Research pivot rationale
-- `docs/plans/2026-01-16-nfl-upset-implementation-plan.md` - Implementation plan
-- `docs/data-split-change.md` - Data split rationale

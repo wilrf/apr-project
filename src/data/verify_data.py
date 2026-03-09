@@ -51,7 +51,9 @@ def verify_data_coverage(
         coverage_by_season[season] = {
             "total_games": total_games,
             "games_with_spread": int(games_with_spread),
-            "coverage_pct": games_with_spread / total_games * 100 if total_games > 0 else 0,
+            "coverage_pct": (
+                games_with_spread / total_games * 100 if total_games > 0 else 0
+            ),
         }
 
     # Write README
@@ -84,17 +86,19 @@ def _write_data_readme(
             f"| {season} | {stats['total_games']} | {stats['games_with_spread']} | {stats['coverage_pct']:.1f}% |"
         )
 
-    lines.extend([
-        "",
-        f"## Merge Statistics",
-        "",
-        f"- Overall merge rate: {audit['merge_rate']:.1%}",
-        f"- Unmatched NFL games: {len(audit['unmatched_nfl'])}",
-        "",
-        "## Data Gaps",
-        "",
-        "Document any identified gaps here after running verification.",
-    ])
+    lines.extend(
+        [
+            "",
+            f"## Merge Statistics",
+            "",
+            f"- Overall merge rate: {audit['merge_rate']:.1%}",
+            f"- Unmatched NFL games: {len(audit['unmatched_nfl'])}",
+            "",
+            "## Data Gaps",
+            "",
+            "Document any identified gaps here after running verification.",
+        ]
+    )
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text("\n".join(lines))
@@ -110,4 +114,6 @@ if __name__ == "__main__":
     print("\n=== Coverage Summary ===")
     for season, stats in results["coverage_by_season"].items():
         if stats["coverage_pct"] < 90:
-            print(f"WARNING: {season} has only {stats['coverage_pct']:.1f}% spread coverage")
+            print(
+                f"WARNING: {season} has only {stats['coverage_pct']:.1f}% spread coverage"
+            )

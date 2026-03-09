@@ -10,10 +10,12 @@ class TestTimeSeriesCVSplitter:
         """Sample data spanning multiple seasons."""
         seasons = list(range(2016, 2023))  # 2016-2022 (7 seasons for 6-fold CV)
         games_per_season = 10
-        return pd.DataFrame({
-            "game_id": [f"g{i}" for i in range(len(seasons) * games_per_season)],
-            "season": [s for s in seasons for _ in range(games_per_season)],
-        })
+        return pd.DataFrame(
+            {
+                "game_id": [f"g{i}" for i in range(len(seasons) * games_per_season)],
+                "season": [s for s in seasons for _ in range(games_per_season)],
+            }
+        )
 
     def test_splitter_creates_correct_number_of_folds(self, sample_data):
         """Test that splitter creates expected number of folds."""
@@ -49,10 +51,12 @@ class TestTimeSeriesCVSplitter:
 
     def test_raises_error_insufficient_seasons(self):
         """Test that error raised if not enough seasons."""
-        df = pd.DataFrame({
-            "game_id": ["g1", "g2"],
-            "season": [2022, 2023],
-        })
+        df = pd.DataFrame(
+            {
+                "game_id": ["g1", "g2"],
+                "season": [2022, 2023],
+            }
+        )
         splitter = TimeSeriesCVSplitter(n_folds=6)
         with pytest.raises(ValueError):
             list(splitter.split(df))

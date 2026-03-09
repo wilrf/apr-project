@@ -15,11 +15,13 @@ class TestSHAPAnalysis:
         """Create and train a model."""
         np.random.seed(42)
         n = 100
-        X = pd.DataFrame({
-            "spread_magnitude": np.random.uniform(3, 14, n),
-            "offense_diff": np.random.normal(0, 1, n),
-            "defense_diff": np.random.normal(0, 1, n),
-        })
+        X = pd.DataFrame(
+            {
+                "spread_magnitude": np.random.uniform(3, 14, n),
+                "offense_diff": np.random.normal(0, 1, n),
+                "defense_diff": np.random.normal(0, 1, n),
+            }
+        )
         y = np.random.binomial(1, 0.35, n)
 
         model = UpsetXGBoost()

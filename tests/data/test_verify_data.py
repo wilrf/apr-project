@@ -24,19 +24,23 @@ class TestVerifyDataCoverage:
     ):
         """Test that verify_data_coverage returns a dictionary."""
         # Setup mocks
-        mock_schedules.return_value = pd.DataFrame({
-            "game_id": ["2023_01_KC_DET", "2023_01_BAL_CLE"],
-            "season": [2023, 2023],
-            "week": [1, 1],
-            "home_team": ["DET", "CLE"],
-            "away_team": ["KC", "BAL"],
-        })
+        mock_schedules.return_value = pd.DataFrame(
+            {
+                "game_id": ["2023_01_KC_DET", "2023_01_BAL_CLE"],
+                "season": [2023, 2023],
+                "week": [1, 1],
+                "home_team": ["DET", "CLE"],
+                "away_team": ["KC", "BAL"],
+            }
+        )
         mock_betting.return_value = pd.DataFrame()
         mock_merge.return_value = (
-            pd.DataFrame({
-                "season": [2023, 2023],
-                "spread_favorite": [-3.0, None],
-            }),
+            pd.DataFrame(
+                {
+                    "season": [2023, 2023],
+                    "spread_favorite": [-3.0, None],
+                }
+            ),
             {"merge_rate": 1.0, "unmatched_nfl": pd.DataFrame()},
         )
 
@@ -63,19 +67,23 @@ class TestVerifyDataCoverage:
     ):
         """Test that coverage percentages are calculated correctly."""
         # 4 games total, 3 with spread data
-        mock_schedules.return_value = pd.DataFrame({
-            "game_id": [f"2023_01_{i}" for i in range(4)],
-            "season": [2023] * 4,
-            "week": [1] * 4,
-            "home_team": ["A", "B", "C", "D"],
-            "away_team": ["E", "F", "G", "H"],
-        })
+        mock_schedules.return_value = pd.DataFrame(
+            {
+                "game_id": [f"2023_01_{i}" for i in range(4)],
+                "season": [2023] * 4,
+                "week": [1] * 4,
+                "home_team": ["A", "B", "C", "D"],
+                "away_team": ["E", "F", "G", "H"],
+            }
+        )
         mock_betting.return_value = pd.DataFrame()
         mock_merge.return_value = (
-            pd.DataFrame({
-                "season": [2023] * 4,
-                "spread_favorite": [-3.0, -4.0, -5.0, None],
-            }),
+            pd.DataFrame(
+                {
+                    "season": [2023] * 4,
+                    "spread_favorite": [-3.0, -4.0, -5.0, None],
+                }
+            ),
             {"merge_rate": 1.0, "unmatched_nfl": pd.DataFrame()},
         )
 
@@ -151,7 +159,9 @@ class TestWriteDataReadme:
 
     def test_write_readme_contains_merge_stats(self):
         """Test that README contains merge statistics."""
-        coverage = {2023: {"total_games": 100, "games_with_spread": 95, "coverage_pct": 95.0}}
+        coverage = {
+            2023: {"total_games": 100, "games_with_spread": 95, "coverage_pct": 95.0}
+        }
         audit = {
             "merge_rate": 0.95,
             "unmatched_nfl": pd.DataFrame({"game_id": ["a", "b", "c", "d", "e"]}),

@@ -20,7 +20,10 @@ class ModelComparison:
         """Run pairwise model comparisons."""
         if len(self.model_names) < 2:
             return {}
-        return {f"{a}_vs_{b}": self._compare_pair(a, b) for a, b in combinations(self.model_names, 2)}
+        return {
+            f"{a}_vs_{b}": self._compare_pair(a, b)
+            for a, b in combinations(self.model_names, 2)
+        }
 
     def _compare_pair(self, model_a: str, model_b: str) -> Dict[str, float]:
         """Compare two models on shared metrics and prediction correlation."""
@@ -46,7 +49,11 @@ class ModelComparison:
             all_metrics.update(summary["models"][name].keys())
 
         for metric in all_metrics:
-            scores = [(n, r["metrics"][metric]) for n, r in self.model_results.items() if metric in r.get("metrics", {})]
+            scores = [
+                (n, r["metrics"][metric])
+                for n, r in self.model_results.items()
+                if metric in r.get("metrics", {})
+            ]
             scores.sort(key=lambda x: x[1], reverse=(metric in HIGHER_IS_BETTER))
             summary["rankings"][metric] = [n for n, _ in scores]
 
@@ -88,21 +95,25 @@ class ModelComparison:
                 if i < j:
                     pa, pb = predictions[model_a], predictions[model_b]
                     agreement = (pa == pb).mean()
-                    rows.append({
-                        "model_a": model_a,
-                        "model_b": model_b,
-                        "agreement_rate": agreement,
-                    })
+                    rows.append(
+                        {
+                            "model_a": model_a,
+                            "model_b": model_b,
+                            "agreement_rate": agreement,
+                        }
+                    )
 
         # Add all-agree rate if 3+ models
         if len(model_list) >= 3:
             preds_matrix = np.column_stack([predictions[m] for m in model_list])
             all_agree = (preds_matrix.std(axis=1) == 0).mean()
-            rows.append({
-                "model_a": "ALL",
-                "model_b": "ALL",
-                "agreement_rate": all_agree,
-            })
+            rows.append(
+                {
+                    "model_a": "ALL",
+                    "model_b": "ALL",
+                    "agreement_rate": all_agree,
+                }
+            )
 
         return pd.DataFrame(rows)
 

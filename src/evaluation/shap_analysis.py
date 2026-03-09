@@ -48,10 +48,7 @@ def get_shap_feature_importance(
     # Mean absolute SHAP value per feature
     importance = np.abs(shap_values).mean(axis=0)
 
-    return {
-        name: float(imp)
-        for name, imp in zip(X.columns, importance)
-    }
+    return {name: float(imp) for name, imp in zip(X.columns, importance)}
 
 
 def get_shap_summary(

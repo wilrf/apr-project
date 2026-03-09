@@ -6,18 +6,12 @@ import pandas as pd
 from pathlib import Path
 from typing import TypedDict, Tuple
 
-from src.data.betting_loader import TEAM_ABBR_MAP
-
-
-def normalize_team_abbr(abbr: str) -> str:
-    """Normalize team abbreviation to current franchise name."""
-    if pd.isna(abbr):
-        return abbr
-    return TEAM_ABBR_MAP.get(abbr, abbr)
+from src.data.betting_loader import normalize_team_abbr
 
 
 class MergeAudit(TypedDict):
     """Audit information from data merge."""
+
     unmatched_nfl: pd.DataFrame
     unmatched_betting: pd.DataFrame
     duplicate_matches: pd.DataFrame
@@ -51,12 +45,14 @@ def merge_nfl_betting_data(
             nfl_df[col] = nfl_df[col].apply(normalize_team_abbr)
 
     # Standardize betting columns for merge
-    betting_df = betting_df.rename(columns={
-        "schedule_season": "season",
-        "schedule_week": "week",
-        "team_home": "home_team",
-        "team_away": "away_team",
-    })
+    betting_df = betting_df.rename(
+        columns={
+            "schedule_season": "season",
+            "schedule_week": "week",
+            "team_home": "home_team",
+            "team_away": "away_team",
+        }
+    )
 
     # Track original counts for audit
     nfl_count = len(nfl_df)
@@ -90,13 +86,29 @@ def merge_nfl_betting_data(
     unmatched_cols = [c for c in unmatched_cols if c in unmatched_nfl.columns]
 
     audit: MergeAudit = {
-        "unmatched_nfl": unmatched_nfl[unmatched_cols] if unmatched_cols else unmatched_nfl,
+        "unmatched_nfl": (
+            unmatched_nfl[unmatched_cols] if unmatched_cols else unmatched_nfl
+        ),
         "unmatched_betting": pd.DataFrame(),  # Would need separate tracking
         "duplicate_matches": duplicate_matches,
         "merge_rate": merge_rate,
     }
 
     return matched, audit
+
+
+def merge_epa_data(game_df: pd.DataFrame, epa_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Left join EPA data onto the game DataFrame.
+
+    Args:
+        game_df: Game-level DataFrame with game_id column
+        epa_df: EPA DataFrame from epa_loader.load_game_epa()
+
+    Returns:
+        DataFrame enriched with 4 EPA columns (nullable float)
+    """
+    return game_df.merge(epa_df, on="game_id", how="left")
 
 
 def save_merge_audit(audit: MergeAudit, filepath: Path) -> None:
