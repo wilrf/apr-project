@@ -1,7 +1,8 @@
 # tests/evaluation/test_shap_analysis.py
-import pytest
-import pandas as pd
 import numpy as np
+import pandas as pd
+import pytest
+
 from src.evaluation.shap_analysis import (
     compute_shap_values,
     get_shap_feature_importance,
@@ -50,3 +51,10 @@ class TestSHAPAnalysis:
 
         # SHAP values shouldn't be excessively large
         assert np.abs(shap_values).max() < 10
+
+    def test_compute_shap_values_requires_fitted_model(self):
+        model = UpsetXGBoost()
+        X = pd.DataFrame({"spread_magnitude": [7.0], "offense_diff": [0.1]})
+
+        with pytest.raises(ValueError, match="not fitted"):
+            compute_shap_values(model, X)

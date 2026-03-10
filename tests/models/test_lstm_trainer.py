@@ -50,7 +50,7 @@ def sample_training_data():
                         "away_team": away,
                         "home_score": home_score,
                         "away_score": away_score,
-                        "spread_favorite": abs(spread),
+                        "spread_favorite": spread,
                         "underdog": underdog,
                         "favorite": favorite,
                         "upset": upset,
@@ -171,6 +171,17 @@ class TestSiameseLSTMTrainer:
 
         with pytest.raises(ValueError, match="Model not trained"):
             trainer.predict_proba(sample_training_data)
+
+    def test_calculate_metrics_handles_single_class(self):
+        trainer = SiameseLSTMTrainer()
+
+        metrics = trainer._calculate_metrics(
+            np.array([0, 0, 0], dtype=float),
+            np.array([0.0, 1e-12, 0.2], dtype=float),
+        )
+
+        assert np.isnan(metrics["auc_roc"])
+        assert np.isfinite(metrics["log_loss"])
 
 
 class TestSiameseLSTMTrainerCrossValidation:
@@ -371,3 +382,50 @@ class TestDataLeakagePrevention:
         # Predictions should be valid probabilities
         for pred in results["predictions"]:
             assert all(0 <= p <= 1 for p in pred["y_pred"])
+
+    def test_cv_val_sequences_use_train_stats_not_own(
+        self, sample_training_data, monkeypatch
+    ):
+        """H12 regression: val sequences must be normalized with TRAIN stats.
+
+        The previous test only checked structural output. This test captures
+        the actual stats argument passed to build_siamese_sequences for each
+        call, proving that val gets train_stats (not None/recomputed).
+        """
+        import src.models.lstm_trainer as lstm_trainer_module
+
+        calls = []
+        original_build = lstm_trainer_module.build_siamese_sequences
+
+        def tracking_build(df, normalize=True, stats=None, **kwargs):
+            result = original_build(df, normalize=normalize, stats=stats, **kwargs)
+            calls.append({"n_rows": len(df), "stats_provided": stats is not None})
+            return result
+
+        monkeypatch.setattr(
+            lstm_trainer_module, "build_siamese_sequences", tracking_build
+        )
+
+        trainer = SiameseLSTMTrainer(
+            hidden_size=16,
+            num_layers=1,
+            epochs=1,
+            batch_size=64,
+            n_folds=2,
+        )
+        trainer.cross_validate(sample_training_data)
+
+        # 2 folds × 2 calls each (train + val) = 4 calls
+        assert len(calls) == 4
+
+        # For each fold: first call is train (stats=None), second is val
+        # (stats=train_stats).
+        for fold_idx in range(2):
+            train_call = calls[fold_idx * 2]
+            val_call = calls[fold_idx * 2 + 1]
+            assert not train_call[
+                "stats_provided"
+            ], f"Fold {fold_idx}: train should compute fresh stats (stats=None)"
+            assert val_call[
+                "stats_provided"
+            ], f"Fold {fold_idx}: val must use train stats (stats≠None)"

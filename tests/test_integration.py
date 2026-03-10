@@ -7,7 +7,7 @@ import pandas as pd
 import pytest
 
 from src.evaluation.metrics import calculate_baseline_brier
-from src.features.pipeline import FeatureEngineeringPipeline
+from src.features.pipeline import FeatureEngineeringPipeline, get_xgb_feature_columns
 from src.models.trainer import ModelTrainer
 from src.models.xgboost_model import UpsetXGBoost
 
@@ -131,7 +131,7 @@ class TestFullPipelineIntegration:
         if len(valid_df) < 20:
             pytest.skip("Not enough valid samples for test")
 
-        feature_cols = pipeline.get_feature_columns()
+        feature_cols = get_xgb_feature_columns()
         X = valid_df[feature_cols]
         y = valid_df["upset"].astype(int)
 

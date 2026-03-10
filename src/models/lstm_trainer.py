@@ -8,9 +8,10 @@ import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
-from sklearn.metrics import brier_score_loss, log_loss, roc_auc_score
+from sklearn.metrics import brier_score_loss
 from torch.utils.data import DataLoader
 
+from src.evaluation.metrics import safe_log_loss, safe_roc_auc_score
 from src.models.cv_splitter import TimeSeriesCVSplitter
 from src.models.lstm_config import (
     TUNED_LSTM_MODEL_PARAMS,
@@ -255,8 +256,8 @@ class SiameseLSTMTrainer:
         y_pred_clipped = np.clip(y_pred, 1e-7, 1 - 1e-7)
 
         return {
-            "auc_roc": roc_auc_score(y_true, y_pred),
-            "log_loss": log_loss(y_true, y_pred_clipped),
+            "auc_roc": safe_roc_auc_score(y_true, y_pred),
+            "log_loss": safe_log_loss(y_true, y_pred_clipped),
             "brier_score": brier_score_loss(y_true, y_pred),
         }
 
@@ -343,8 +344,8 @@ class SiameseLSTMTrainer:
 
         for metric in metric_names:
             values = [f[metric] for f in fold_metrics]
-            aggregated[f"{metric}_mean"] = float(np.mean(values))
-            aggregated[f"{metric}_std"] = float(np.std(values))
+            aggregated[f"{metric}_mean"] = float(np.nanmean(values))
+            aggregated[f"{metric}_std"] = float(np.nanstd(values))
 
         return aggregated
 

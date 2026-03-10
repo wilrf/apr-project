@@ -1,7 +1,8 @@
 # tests/data/test_merger.py
-import pytest
 import pandas as pd
-from src.data.merger import merge_nfl_betting_data
+import pytest
+
+from src.data.merger import merge_nfl_betting_data, save_merge_audit
 
 
 class TestMergeNflBettingData:
@@ -95,3 +96,29 @@ class TestMergeAudit:
         )
         _, audit = merge_nfl_betting_data(nfl_df, betting_df)
         assert audit["merge_rate"] == 0.5  # 1 of 2 matched
+
+    def test_save_merge_audit_creates_parent_directories(self, tmp_path):
+        _, audit = merge_nfl_betting_data(
+            pd.DataFrame(
+                {
+                    "game_id": ["2023_01_KC_DET"],
+                    "season": [2023],
+                    "week": [1],
+                    "home_team": ["DET"],
+                    "away_team": ["KC"],
+                }
+            ),
+            pd.DataFrame(
+                {
+                    "schedule_season": [2023],
+                    "schedule_week": [1],
+                    "team_home": ["XXX"],
+                    "team_away": ["YYY"],
+                }
+            ),
+        )
+        output_path = tmp_path / "nested" / "audit.csv"
+
+        save_merge_audit(audit, output_path)
+
+        assert output_path.exists()

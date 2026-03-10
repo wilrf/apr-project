@@ -1,16 +1,20 @@
 """Model comparison utilities for LR, XGBoost, and LSTM."""
 
 from __future__ import annotations
+
+from itertools import combinations
+from typing import Any, Dict, Optional
+
 import numpy as np
 import pandas as pd
-from typing import Dict, Any, List, Optional
-from itertools import combinations
+
+from src.evaluation.metrics import safe_probability_correlation
 
 HIGHER_IS_BETTER = {"auc_roc", "accuracy", "roi"}
 
 
 class ModelComparison:
-    """Compare multiple models on the same data with pairwise metrics and prediction correlation."""
+    """Compare multiple models with pairwise metrics and prediction correlation."""
 
     def __init__(self, model_results: Dict[str, Dict[str, Any]]):
         self.model_results = model_results
@@ -35,7 +39,9 @@ class ModelComparison:
         if "y_pred" in ra and "y_pred" in rb:
             pa, pb = np.array(ra["y_pred"]), np.array(rb["y_pred"])
             if len(pa) == len(pb):
-                comparison["prediction_correlation"] = float(np.corrcoef(pa, pb)[0, 1])
+                comparison["prediction_correlation"] = safe_probability_correlation(
+                    pa, pb
+                )
 
         return comparison
 
@@ -59,18 +65,29 @@ class ModelComparison:
 
         return summary
 
-    def get_agreement_matrix(self, threshold: float = 0.5) -> pd.DataFrame:
+    def get_agreement_matrix(self, threshold: Optional[float] = None) -> pd.DataFrame:
         """
         Get pairwise binary prediction agreement rates between all models.
 
         Args:
-            threshold: Probability threshold for binary predictions
+            threshold: Probability threshold for binary predictions.
+                       Defaults to base upset rate computed from y_true.
 
         Returns:
             DataFrame with agreement rates for all model pairs
         """
         if len(self.model_names) < 2:
             return pd.DataFrame()
+
+        # Default to base rate from y_true, consistent with disagreement.py
+        if threshold is None:
+            all_y = [
+                y
+                for r in self.model_results.values()
+                if "y_true" in r
+                for y in r["y_true"]
+            ]
+            threshold = float(np.mean(all_y)) if all_y else 0.5
 
         # Extract predictions for each model
         predictions: Dict[str, np.ndarray] = {}
@@ -135,9 +152,17 @@ class ModelComparison:
         # Find common length
         min_len = min(len(p) for p in predictions.values())
         model_names = list(predictions.keys())
-        data = np.column_stack([predictions[m][:min_len] for m in model_names])
 
-        corr = np.corrcoef(data.T)
+        corr = np.eye(len(model_names), dtype=float)
+        for i in range(len(model_names)):
+            for j in range(i + 1, len(model_names)):
+                val = safe_probability_correlation(
+                    predictions[model_names[i]][:min_len],
+                    predictions[model_names[j]][:min_len],
+                )
+                corr[i, j] = val
+                corr[j, i] = val
+
         return pd.DataFrame(corr, index=model_names, columns=model_names)
 
     def get_ensemble_predictions(

@@ -18,11 +18,19 @@ from typing import Dict, List, Optional
 
 import numpy as np
 import pandas as pd
-from sklearn.metrics import brier_score_loss, log_loss, roc_auc_score
+from sklearn.metrics import brier_score_loss
 
 from src.evaluation.disagreement import DisagreementAnalyzer, PredictionCategory
+from src.evaluation.metrics import (
+    safe_log_loss,
+    safe_probability_correlation,
+    safe_roc_auc_score,
+)
 from src.features import pipeline
-from src.features.pipeline import get_xgb_feature_columns, get_xgb_no_spread_feature_columns
+from src.features.pipeline import (
+    get_xgb_feature_columns,
+    get_xgb_no_spread_feature_columns,
+)
 from src.models.cv_splitter import TimeSeriesCVSplitter
 from src.models.logistic_model import UpsetLogisticRegression
 from src.models.lstm_config import TUNED_LSTM_TRAINING_PARAMS
@@ -64,7 +72,13 @@ class QuickResult:
 
 def load_data():
     """Load and prepare data."""
-    train_df = pd.read_csv(DATA_DIR / "train.csv", low_memory=False)
+    train_path = DATA_DIR / "train.csv"
+    if not train_path.exists():
+        raise FileNotFoundError(
+            f"{train_path} not found. Run "
+            "'python3 -m src.data.generate_features' first."
+        )
+    train_df = pd.read_csv(train_path, low_memory=False)
     xgb_cols = get_xgb_feature_columns()
     feature_cols = pipeline.get_feature_columns()
 
@@ -73,7 +87,7 @@ def load_data():
     all_cols = list(set(feature_cols + xgb_cols))
     train_valid[all_cols] = train_valid[all_cols].fillna(0)
 
-    return train_valid, feature_cols
+    return train_valid, feature_cols, train_df
 
 
 def get_experiment_configs():
@@ -104,9 +118,9 @@ def get_experiment_configs():
 def calc_metrics(y_true, y_pred):
     """Calculate standard metrics."""
     return {
-        "auc_roc": float(roc_auc_score(y_true, y_pred)),
+        "auc_roc": safe_roc_auc_score(y_true, y_pred),
         "brier_score": float(brier_score_loss(y_true, y_pred)),
-        "log_loss": float(log_loss(y_true, y_pred)),
+        "log_loss": safe_log_loss(y_true, y_pred),
     }
 
 
@@ -123,8 +137,11 @@ def run_quick_ab(train_df) -> Dict[str, QuickResult]:
     results = {}
     for config in [config_a, config_b]:
         print(f"\n{'='*60}")
-        print(f"QUICK EXPERIMENT: {config.name} "
-              f"(LR: {len(config.feature_cols)}, XGB: {len(config.xgb_feature_cols)} features)")
+        print(
+            f"QUICK EXPERIMENT: {config.name} "
+            f"(LR: {len(config.feature_cols)}, "
+            f"XGB: {len(config.xgb_feature_cols)} features)"
+        )
         print(f"{'='*60}")
 
         all_lr_probs, all_xgb_probs, all_y = [], [], []
@@ -160,8 +177,8 @@ def run_quick_ab(train_df) -> Dict[str, QuickResult]:
             all_xgb_probs.extend(xgb_probs)
             all_y.extend(y_val.values)
 
-            lr_auc = roc_auc_score(y_val, lr_probs)
-            xgb_auc = roc_auc_score(y_val, xgb_probs)
+            lr_auc = safe_roc_auc_score(y_val, lr_probs)
+            xgb_auc = safe_roc_auc_score(y_val, xgb_probs)
             print(
                 f"  Fold {fold_idx+1} (val={val_season}):"
                 f" LR AUC={lr_auc:.3f}, XGB AUC={xgb_auc:.3f}"
@@ -200,10 +217,14 @@ def print_quick_comparison(results: Dict[str, QuickResult]):
     print(f"\n{'='*60}")
     print("QUICK A/B COMPARISON: LR + XGBoost")
     print(f"{'='*60}")
-    print(f"  Experiment A: LR={len(a.config.feature_cols)}, "
-          f"XGB={len(a.config.xgb_feature_cols)} (with spread)")
-    print(f"  Experiment B: LR={len(b.config.feature_cols)}, "
-          f"XGB={len(b.config.xgb_feature_cols)} (without spread)")
+    print(
+        f"  Experiment A: LR={len(a.config.feature_cols)}, "
+        f"XGB={len(a.config.xgb_feature_cols)} (with spread)"
+    )
+    print(
+        f"  Experiment B: LR={len(b.config.feature_cols)}, "
+        f"XGB={len(b.config.xgb_feature_cols)} (without spread)"
+    )
 
     # Metrics table
     print(
@@ -233,8 +254,8 @@ def print_quick_comparison(results: Dict[str, QuickResult]):
         print(f"  {label}: LR={lr_auc:.4f}, XGB={xgb_auc:.4f} -> {winner} wins")
 
     # Correlation
-    corr_a = np.corrcoef(a.lr_probs, a.xgb_probs)[0, 1]
-    corr_b = np.corrcoef(b.lr_probs, b.xgb_probs)[0, 1]
+    corr_a = safe_probability_correlation(a.lr_probs, a.xgb_probs)
+    corr_b = safe_probability_correlation(b.lr_probs, b.xgb_probs)
     print("\nLR-XGB Probability Correlation:")
     print(f"  With Spread:    {corr_a:.3f}")
     print(f"  Without Spread: {corr_b:.3f}")
@@ -259,15 +280,17 @@ def print_quick_comparison(results: Dict[str, QuickResult]):
 # ============================================================
 
 
-def run_full_ab(train_df) -> Dict[str, UnifiedCVResults]:
+def run_full_ab(train_df, full_df=None) -> Dict[str, UnifiedCVResults]:
     """Run full unified CV for both experiments."""
     config_a, config_b = get_experiment_configs()
     results = {}
 
     for config in [config_a, config_b]:
         print(f"\n{'='*60}")
-        print(f"FULL EXPERIMENT: {config.name} "
-              f"(LR: {len(config.feature_cols)}, XGB: {len(config.xgb_feature_cols)})")
+        print(
+            f"FULL EXPERIMENT: {config.name} "
+            f"(LR: {len(config.feature_cols)}, XGB: {len(config.xgb_feature_cols)})"
+        )
         print(f"{'='*60}")
 
         trainer = UnifiedTrainer()
@@ -280,6 +303,7 @@ def run_full_ab(train_df) -> Dict[str, UnifiedCVResults]:
             lstm_epochs=int(TUNED_LSTM_TRAINING_PARAMS["epochs"]),
             lstm_batch_size=int(TUNED_LSTM_TRAINING_PARAMS["batch_size"]),
             verbose=True,
+            full_df=full_df,
         )
         results[config.name] = cv_results
 
@@ -335,8 +359,16 @@ def print_full_comparison(results: Dict[str, UnifiedCVResults]):
         lr_p = np.array([p.lr_prob for p in preds])
         xgb_p = np.array([p.xgb_prob for p in preds])
         lstm_p = np.array([p.lstm_prob for p in preds])
-        data = np.column_stack([lr_p, xgb_p, lstm_p])
-        corr = np.corrcoef(data.T)
+        lr_xgb = safe_probability_correlation(lr_p, xgb_p)
+        lr_lstm = safe_probability_correlation(lr_p, lstm_p)
+        xgb_lstm = safe_probability_correlation(xgb_p, lstm_p)
+        corr = np.array(
+            [
+                [1.0, lr_xgb, lr_lstm],
+                [lr_xgb, 1.0, xgb_lstm],
+                [lr_lstm, xgb_lstm, 1.0],
+            ]
+        )
         print(f"\nCorrelation Matrix ({label}):")
         print("       LR     XGB    LSTM")
         for i, name in enumerate(["LR", "XGB", "LSTM"]):
@@ -383,8 +415,8 @@ def print_full_comparison(results: Dict[str, UnifiedCVResults]):
         lstm_p = np.array([p.lstm_prob for p in bucket])
         print(
             f"{label:<16} {len(bucket):>5} {y.mean():>9.1%} "
-            f"{roc_auc_score(y, lr_p):>8.3f} {roc_auc_score(y, xgb_p):>8.3f} "
-            f"{roc_auc_score(y, lstm_p):>9.3f}"
+            f"{safe_roc_auc_score(y, lr_p):>8.3f} {safe_roc_auc_score(y, xgb_p):>8.3f} "
+            f"{safe_roc_auc_score(y, lstm_p):>9.3f}"
         )
 
 
@@ -402,7 +434,7 @@ def save_results(quick_results=None, full_results=None):
                     f"- LR AUC: {r.lr_metrics['auc_roc']:.4f}",
                     f"- XGB AUC: {r.xgb_metrics['auc_roc']:.4f}",
                     f"- LR-XGB correlation: "
-                    f"{np.corrcoef(r.lr_probs, r.xgb_probs)[0,1]:.3f}",
+                    f"{safe_probability_correlation(r.lr_probs, r.xgb_probs):.3f}",
                     "",
                 ]
             )
@@ -439,24 +471,26 @@ def main():
     print("A/B EXPERIMENT: WITH SPREAD vs WITHOUT SPREAD")
     print("=" * 60)
 
-    train_df, feature_cols = load_data()
+    train_df, feature_cols, full_train_df = load_data()
     xgb_cols = get_xgb_feature_columns()
     print(f"Training data: {len(train_df)} games")
-    print(f"LR features:  {len(feature_cols)} with spread / "
-          f"{len(pipeline.get_no_spread_feature_columns())} without")
-    print(f"XGB features: {len(xgb_cols)} with spread / "
-          f"{len(get_xgb_no_spread_feature_columns())} without")
+    print(
+        f"LR features:  {len(feature_cols)} with spread / "
+        f"{len(pipeline.get_no_spread_feature_columns())} without"
+    )
+    print(
+        f"XGB features: {len(xgb_cols)} with spread / "
+        f"{len(get_xgb_no_spread_feature_columns())} without"
+    )
 
     if args.quick:
         results = run_quick_ab(train_df)
         print_quick_comparison(results)
         save_results(quick_results=results)
     else:
-        quick_results = run_quick_ab(train_df)
-        print_quick_comparison(quick_results)
-        full_results = run_full_ab(train_df)
+        full_results = run_full_ab(train_df, full_df=full_train_df)
         print_full_comparison(full_results)
-        save_results(quick_results=quick_results, full_results=full_results)
+        save_results(full_results=full_results)
 
     print(f"\n{'='*60}")
     print("EXPERIMENT COMPLETE")

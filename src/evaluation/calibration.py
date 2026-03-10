@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from typing import Dict, Optional, Tuple
 
 import numpy as np
+import pandas as pd
 from sklearn.isotonic import IsotonicRegression
 from sklearn.linear_model import LogisticRegression
 
@@ -30,6 +31,10 @@ class PlattScaler:
         self._lr: Optional[LogisticRegression] = None
 
     def fit(self, probs: np.ndarray, y_true: np.ndarray) -> "PlattScaler":
+        if np.unique(y_true).size < 2:
+            raise ValueError(
+                "Platt scaling requires at least two classes in the calibration labels."
+            )
         self._lr = LogisticRegression(solver="lbfgs", max_iter=5000)
         self._lr.fit(probs.reshape(-1, 1), y_true)
         return self
@@ -47,6 +52,11 @@ class IsotonicCalibrator:
         self._ir: Optional[IsotonicRegression] = None
 
     def fit(self, probs: np.ndarray, y_true: np.ndarray) -> "IsotonicCalibrator":
+        if np.unique(y_true).size < 2:
+            raise ValueError(
+                "Isotonic calibration requires at least two classes "
+                "in the calibration labels."
+            )
         self._ir = IsotonicRegression(out_of_bounds="clip")
         self._ir.fit(probs, y_true)
         return self
@@ -75,6 +85,15 @@ def calibrate_models(
     Returns:
         {model_name: CalibrationResult} for each model
     """
+    cal_keys = set(cal_probs)
+    test_keys = set(test_probs)
+    if cal_keys != test_keys:
+        raise ValueError(
+            "cal_probs and test_probs must contain the same model keys. "
+            f"Missing from test_probs: {sorted(cal_keys - test_keys)}; "
+            f"extra in test_probs: {sorted(test_keys - cal_keys)}."
+        )
+
     results: Dict[str, CalibrationResult] = {}
 
     for name in cal_probs:
@@ -96,10 +115,11 @@ def calibrate_models(
 
 
 def generate_calibration_predictions(
-    train_df: "pd.DataFrame",  # noqa: F821
+    train_df: pd.DataFrame,
     feature_cols: list,
     cal_seasons: Tuple[int, ...] = (2021, 2022),
     target_col: str = "upset",
+    xgb_feature_cols: Optional[list] = None,
 ) -> Tuple[Dict[str, np.ndarray], np.ndarray]:
     """
     Train models on pre-calibration data, predict on calibration seasons.
@@ -107,6 +127,14 @@ def generate_calibration_predictions(
     Splits training data into:
       - fit set: seasons before min(cal_seasons)
       - calibration set: cal_seasons
+
+    Args:
+        train_df: Full training DataFrame
+        feature_cols: LR feature columns (46 base)
+        cal_seasons: Seasons to use for calibration
+        target_col: Target column name
+        xgb_feature_cols: XGB feature columns (70 = base + lags).
+            Defaults to None (uses feature_cols, same as LR).
 
     Returns:
         (model_probs, y_true) on the calibration set
@@ -117,12 +145,24 @@ def generate_calibration_predictions(
     from src.models.sequence_builder import build_siamese_sequences
     from src.models.unified_trainer import UnifiedTrainer
 
+    active_xgb_cols = xgb_feature_cols if xgb_feature_cols is not None else feature_cols
+
     cal_set = set(cal_seasons)
     cutoff = min(cal_seasons)
 
-    fit_df = train_df[train_df["season"] < cutoff].copy()
-    cal_df = train_df[train_df["season"].isin(cal_set)].copy()
+    fit_df = train_df[
+        (train_df["season"] < cutoff) & train_df[target_col].notna()
+    ].copy()
+    cal_df = train_df[
+        train_df["season"].isin(cal_set) & train_df[target_col].notna()
+    ].copy()
+    all_feature_cols = list(dict.fromkeys(feature_cols + active_xgb_cols))
 
+    fit_df[all_feature_cols] = fit_df[all_feature_cols].fillna(0)
+    cal_df[all_feature_cols] = cal_df[all_feature_cols].fillna(0)
+
+    if len(fit_df) == 0:
+        raise ValueError(f"No fit data before calibration seasons {cal_seasons}")
     if len(cal_df) == 0:
         raise ValueError(f"No calibration data for seasons {cal_seasons}")
 
@@ -136,14 +176,17 @@ def generate_calibration_predictions(
         lstm_epochs=int(TUNED_LSTM_TRAINING_PARAMS["epochs"]),
         lstm_batch_size=int(TUNED_LSTM_TRAINING_PARAMS["batch_size"]),
         verbose=False,
+        xgb_feature_cols=active_xgb_cols,
+        full_df=train_df,
     )
 
-    X_cal = cal_df[feature_cols]
-    lr_probs = models["lr_model"].predict_proba(X_cal)
-    xgb_probs = models["xgb_model"].predict_proba(X_cal)
+    X_cal_lr = cal_df[feature_cols]
+    X_cal_xgb = cal_df[active_xgb_cols]
+    lr_probs = models["lr_model"].predict_proba(X_cal_lr)
+    xgb_probs = models["xgb_model"].predict_proba(X_cal_xgb)
 
     cal_seq, _ = build_siamese_sequences(
-        cal_df, normalize=True, stats=models["lstm_stats"]
+        cal_df, normalize=True, stats=models["lstm_stats"], history_df=train_df
     )
     lstm_model = models["lstm_model"]
     lstm_model.eval()
@@ -156,7 +199,7 @@ def generate_calibration_predictions(
                 torch.FloatTensor(cal_seq.underdog_masks),
                 torch.FloatTensor(cal_seq.favorite_masks),
             )
-            .squeeze()
+            .squeeze(-1)
             .cpu()
             .numpy()
         )

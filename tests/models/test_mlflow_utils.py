@@ -1,7 +1,5 @@
 # tests/models/test_mlflow_utils.py
-import pytest
-import tempfile
-import os
+import sys
 from unittest.mock import MagicMock, patch
 
 
@@ -60,3 +58,27 @@ class TestMLflowUtils:
         # Should work as context manager
         with tracker:
             tracker.log_params({"test": 1})
+
+    def test_enabled_tracker_uses_mlflow_client(self):
+        from src.models.mlflow_utils import MLflowTracker
+
+        fake_mlflow = MagicMock()
+        fake_mlflow.start_run.return_value = MagicMock()
+
+        with patch.dict(sys.modules, {"mlflow": fake_mlflow}):
+            tracker = MLflowTracker(
+                experiment_name="exp",
+                run_name="run",
+                enabled=True,
+                tracking_uri="file:///tmp/mlruns",
+            )
+            with tracker:
+                tracker.log_params({"alpha": 1})
+                tracker.log_metric("auc", 0.7)
+
+        fake_mlflow.set_tracking_uri.assert_called_once_with("file:///tmp/mlruns")
+        fake_mlflow.set_experiment.assert_called_once_with("exp")
+        fake_mlflow.start_run.assert_called_once_with(run_name="run")
+        fake_mlflow.log_params.assert_called_once_with({"alpha": 1})
+        fake_mlflow.log_metric.assert_called_once_with("auc", 0.7, step=None)
+        fake_mlflow.end_run.assert_called_once()

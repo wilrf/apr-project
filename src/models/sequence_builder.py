@@ -101,17 +101,20 @@ def _safe_float(row: pd.Series, key: str) -> float:
     return float(val) if pd.notna(val) else np.nan
 
 
-def _build_team_game_history(df: pd.DataFrame) -> Dict[Tuple[str, int], pd.DataFrame]:
+def _build_team_game_history(df: pd.DataFrame) -> Dict[str, pd.DataFrame]:
     """
-    Build game history for each team in each season.
+    Build game history for each team across all seasons.
+
+    History crosses season boundaries so the LSTM can see late-season games
+    when predicting early the following season.
 
     Args:
         df: DataFrame with game data including scores
 
     Returns:
-        Dictionary mapping (team, season) to DataFrame of team's games in order
+        Dictionary mapping team to DataFrame of team's games in chronological order
     """
-    history: Dict[Tuple[str, int], List[dict]] = {}
+    history: Dict[str, List[dict]] = {}
 
     for _, row in df.iterrows():
         season = row["season"]
@@ -189,20 +192,20 @@ def _build_team_game_history(df: pd.DataFrame) -> Dict[Tuple[str, int], pd.DataF
 
             # Opponent Elo (from pre-game ratings merged by pipeline)
             opp_elo_val = row.get(f"{opp_prefix}_elo_pre", 1500.0)
-            opponent_elo = (
-                float(opp_elo_val) if pd.notna(opp_elo_val) else 1500.0
-            )
+            opponent_elo = float(opp_elo_val) if pd.notna(opp_elo_val) else 1500.0
 
-            key = (team, season)
-            if key not in history:
-                history[key] = []
-            history[key].append(
+            if team not in history:
+                history[team] = []
+            history[team].append(
                 {
+                    "season": season,
                     "week": week,
                     "points_scored": float(scored),
                     "points_allowed": float(allowed),
                     "point_diff": float(scored - allowed),
-                    "win": 1.0 if scored > allowed else 0.0,
+                    "win": (
+                        1.0 if scored > allowed else (0.5 if scored == allowed else 0.0)
+                    ),
                     "was_home": is_home,
                     "rest_days": rest,
                     "days_since_last_game": rest,
@@ -221,11 +224,13 @@ def _build_team_game_history(df: pd.DataFrame) -> Dict[Tuple[str, int], pd.DataF
                 }
             )
 
-    # Convert to DataFrames sorted by week
+    # Convert to DataFrames sorted chronologically
     result = {}
-    for key, games in history.items():
-        team_df = pd.DataFrame(games).sort_values("week").reset_index(drop=True)
-        result[key] = team_df
+    for team, games in history.items():
+        team_df = (
+            pd.DataFrame(games).sort_values(["season", "week"]).reset_index(drop=True)
+        )
+        result[team] = team_df
 
     return result
 
@@ -234,18 +239,21 @@ def _get_team_sequence(
     team: str,
     season: int,
     week: int,
-    team_history: Dict[Tuple[str, int], pd.DataFrame],
+    team_history: Dict[str, pd.DataFrame],
     seq_length: int = SEQUENCE_LENGTH,
     sequence_features: Optional[List[str]] = None,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
     Get the last N games for a team prior to a given week.
 
+    History crosses season boundaries: early-season games draw from the
+    prior season's tail.
+
     Args:
         team: Team abbreviation
         season: Season year
         week: Week number (games BEFORE this week)
-        team_history: Dictionary of team game histories
+        team_history: Dictionary mapping team → chronological game DataFrame
         seq_length: Number of games to include
 
     Returns:
@@ -260,14 +268,16 @@ def _get_team_sequence(
     sequence = np.zeros((seq_length, n_features))
     mask = np.zeros(seq_length)
 
-    key = (team, season)
-    if key not in team_history:
+    if team not in team_history:
         return sequence, mask
 
-    team_df = team_history[key]
+    team_df = team_history[team]
 
-    # Get games before this week
-    prior_games = team_df[team_df["week"] < week]
+    # Get games chronologically before this (season, week)
+    prior_games = team_df[
+        (team_df["season"] < season)
+        | ((team_df["season"] == season) & (team_df["week"] < week))
+    ]
 
     if len(prior_games) == 0:
         return sequence, mask
@@ -323,15 +333,21 @@ def _normalize_sequences(
             mean, std = stats[feature_name]
         else:
             valid_vals = feature_vals[masks > 0]
-            mean = valid_vals.mean() if len(valid_vals) > 0 else 0.0
-            std = valid_vals.std() if len(valid_vals) > 0 else 1.0
+            finite_vals = valid_vals[np.isfinite(valid_vals)]
+            if len(finite_vals) > 0:
+                mean = float(np.mean(finite_vals))
+                std = float(np.std(finite_vals))
+            else:
+                mean = 0.0
+                std = 1.0
 
         computed_stats[feature_name] = (mean, std)
+        safe_feature_vals = np.nan_to_num(feature_vals, nan=mean)
 
         if std > 0:
-            normalized[:, :, f] = (feature_vals - mean) / std
+            normalized[:, :, f] = (safe_feature_vals - mean) / std
         else:
-            normalized[:, :, f] = feature_vals - mean
+            normalized[:, :, f] = safe_feature_vals - mean
 
         # Zero out padded positions
         normalized[:, :, f] = normalized[:, :, f] * masks
@@ -357,13 +373,13 @@ def _extract_matchup_features(
     feat_list = (
         matchup_feature_cols if matchup_feature_cols is not None else MATCHUP_FEATURES
     )
+    missing = [feat for feat in feat_list if feat not in df.columns]
+    if missing:
+        raise ValueError(f"Missing matchup feature columns: {missing}")
     features = []
 
     for feat in feat_list:
-        if feat in df.columns:
-            features.append(df[feat].fillna(0).values)
-        else:
-            features.append(np.zeros(len(df)))
+        features.append(pd.to_numeric(df[feat], errors="coerce").values)
 
     return np.column_stack(features)
 
@@ -375,6 +391,7 @@ def build_siamese_sequences(
     stats: Optional[NormalizationStats] = None,
     matchup_feature_cols: Optional[List[str]] = None,
     sequence_feature_cols: Optional[List[str]] = None,
+    history_df: Optional[pd.DataFrame] = None,
 ) -> Tuple[SiameseLSTMData, Optional[NormalizationStats]]:
     """
     Build Siamese LSTM-ready sequences from game data.
@@ -387,7 +404,8 @@ def build_siamese_sequences(
     independently through the shared LSTM encoder.
 
     Args:
-        df: DataFrame with game data and engineered features
+        df: DataFrame with game data and engineered features.
+            Only rows with valid upset labels become training/prediction samples.
         normalize: Whether to normalize sequence features
         seq_length: Number of historical games per team
         stats: Optional pre-computed normalization stats (from training data).
@@ -397,6 +415,10 @@ def build_siamese_sequences(
             Defaults to None which uses MATCHUP_FEATURES.
         sequence_feature_cols: Optional list of per-game sequence feature names.
             Defaults to None which uses SEQUENCE_FEATURES.
+        history_df: Optional separate DataFrame for building team game histories.
+            Use this to include games that don't have labels (e.g. sub-3-spread
+            games) in team sequences while keeping labeled data separate.
+            When None, ``df`` is used for both labels and history.
 
     Returns:
         Tuple of (SiameseLSTMData, NormalizationStats or None).
@@ -408,8 +430,25 @@ def build_siamese_sequences(
     if len(valid_df) == 0:
         raise ValueError("No games with valid upset targets found")
 
-    # Build team game histories
-    team_history = _build_team_game_history(df)
+    missing_role_mask = (
+        valid_df.get("underdog", pd.Series(np.nan, index=valid_df.index)).isna()
+        | valid_df.get("favorite", pd.Series(np.nan, index=valid_df.index)).isna()
+    )
+    if missing_role_mask.any():
+        bad_game_ids = valid_df.loc[missing_role_mask, "game_id"].astype(str).tolist()
+        raise ValueError(
+            "Found labeled games missing favorite/underdog metadata: "
+            + ", ".join(bad_game_ids[:5])
+        )
+
+    # Build team game histories from the fullest available source
+    history_source = history_df if history_df is not None else df
+    team_history = _build_team_game_history(history_source)
+    if len(history_source) > 0 and not team_history:
+        raise ValueError(
+            "No usable team history could be built from history_df. "
+            "Check that score columns are present and populated."
+        )
 
     n_samples = len(valid_df)
     active_sequence_features = (
@@ -475,6 +514,15 @@ def build_siamese_sequences(
             )
         else:
             # VALIDATION/TEST: Use provided stats
+            missing_sequence_stats = [
+                feature
+                for feature in active_sequence_features
+                if feature not in stats.sequence_stats
+            ]
+            if missing_sequence_stats:
+                raise ValueError(
+                    f"Missing sequence normalization stats: {missing_sequence_stats}"
+                )
             sequence_stats = stats.sequence_stats
 
         # Apply stats to both team sequences
@@ -501,19 +549,38 @@ def build_siamese_sequences(
     matchup_stats: Optional[Dict[str, Tuple[float, float]]] = None
     if normalize:
         matchup_stats = {}
+        if stats is not None:
+            missing_matchup_stats = [
+                feature
+                for feature in active_matchup_features
+                if feature not in stats.matchup_stats
+            ]
+            if missing_matchup_stats:
+                raise ValueError(
+                    f"Missing matchup normalization stats: {missing_matchup_stats}"
+                )
         for f, feat_name in enumerate(active_matchup_features):
             col = matchup_features[:, f]
 
             if stats is None:
                 # TRAINING: Compute from this data
-                mean, std = float(col.mean()), float(col.std())
+                finite = col[np.isfinite(col)]
+                if len(finite) > 0:
+                    mean, std = float(np.mean(finite)), float(np.std(finite))
+                else:
+                    mean, std = 0.0, 1.0
             else:
                 # VALIDATION/TEST: Use provided stats
-                mean, std = stats.matchup_stats.get(feat_name, (0.0, 1.0))
+                mean, std = stats.matchup_stats[feat_name]
 
             matchup_stats[feat_name] = (mean, std)
+            safe_col = np.nan_to_num(col, nan=mean)
             if std > 0:
-                matchup_features[:, f] = (col - mean) / std
+                matchup_features[:, f] = (safe_col - mean) / std
+            else:
+                matchup_features[:, f] = safe_col - mean
+    else:
+        matchup_features = np.nan_to_num(matchup_features, nan=0.0)
 
     # Extract targets
     targets = valid_df["upset"].values.astype(np.float32)

@@ -1,7 +1,8 @@
 # tests/models/test_trainer.py
-import pytest
-import pandas as pd
 import numpy as np
+import pandas as pd
+import pytest
+
 from src.models.trainer import ModelTrainer
 from src.models.xgboost_model import UpsetXGBoost
 
@@ -65,3 +66,15 @@ class TestModelTrainer:
         assert len(results["predictions"]) == 2
         assert "y_true" in results["predictions"][0]
         assert "y_pred" in results["predictions"][0]
+
+    def test_calculate_metrics_handles_single_class(self):
+        model = UpsetXGBoost()
+        trainer = ModelTrainer(model, n_folds=2)
+
+        metrics = trainer._calculate_metrics(
+            pd.Series([1, 1, 1]),
+            np.array([0.9, 1.0, 0.9999999]),
+        )
+
+        assert np.isnan(metrics["auc_roc"])
+        assert np.isfinite(metrics["log_loss"])

@@ -1,10 +1,11 @@
 # tests/evaluation/test_metrics.py
-import pytest
 import numpy as np
+import pytest
+
 from src.evaluation.metrics import (
-    calculate_calibration_metrics,
-    calculate_betting_metrics,
     calculate_baseline_brier,
+    calculate_betting_metrics,
+    calculate_calibration_metrics,
 )
 
 
@@ -18,6 +19,16 @@ class TestCalibrationMetrics:
         result = calculate_calibration_metrics(y_true, y_pred, n_bins=1)
         assert abs(result["calibration_error"]) < 0.1
 
+    def test_multiple_bins_with_constant_predictions_stay_finite(self):
+        y_true = np.array([1, 1, 1, 0, 0, 0])
+        y_pred = np.array([0.5] * 6)
+
+        result = calculate_calibration_metrics(y_true, y_pred, n_bins=5)
+
+        assert np.isfinite(result["calibration_error"])
+        assert len(result["prob_true"]) == 1
+        assert len(result["prob_pred"]) == 1
+
 
 class TestBettingMetrics:
     def test_roi_calculation(self):
@@ -30,6 +41,22 @@ class TestBettingMetrics:
         # 3 wins at +100 = +3 units, 2 losses = -2 units, net +1 unit
         # ROI = 1/5 = 20%
         assert abs(result["roi"] - 0.20) < 0.01
+
+    def test_profit_with_varying_odds(self):
+        """Verify profit formula produces correct results with non-uniform odds."""
+        # 3 bets, 2 wins at different odds, 1 loss
+        y_true = np.array([1, 1, 0])
+        y_pred = np.array([0.8, 0.7, 0.9])  # all above threshold
+        odds = np.array([2.0, 6.0, 3.0])
+
+        result = calculate_betting_metrics(y_true, y_pred, odds, threshold=0.5)
+
+        # Win bet 0: payout (2.0 - 1) = +1.0
+        # Win bet 1: payout (6.0 - 1) = +5.0
+        # Lose bet 2: -1.0
+        # Net profit = 1 + 5 - 1 = 5.0, ROI = 5/3
+        assert result["total_profit"] == pytest.approx(5.0)
+        assert result["roi"] == pytest.approx(5.0 / 3)
 
     def test_no_bets_placed(self):
         """Test handling when threshold is too high."""

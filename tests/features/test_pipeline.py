@@ -8,6 +8,7 @@ from src.features.pipeline import (
     XGB_FEATURE_COLUMNS,
     XGB_FEATURE_COLUMNS_NO_SPREAD,
     FeatureEngineeringPipeline,
+    _identify_underdog,
 )
 
 
@@ -135,3 +136,15 @@ class TestFeatureSemantics:
         result = pipeline.transform(_mock_games())
 
         assert set(FEATURE_COLUMNS).issubset(result.columns)
+
+    def test_identify_underdog_returns_none_for_unknown_favorite(self):
+        row = pd.Series(
+            {
+                "home_team": "KC",
+                "away_team": "BUF",
+                "team_favorite_id": "PHI",
+                "spread_favorite": -3.0,
+            }
+        )
+
+        assert _identify_underdog(row) is None

@@ -1,9 +1,11 @@
 """Betting data loading utilities for Kaggle spreadspoke dataset."""
 
 from __future__ import annotations
-import pandas as pd
+
 from pathlib import Path
 from typing import Optional
+
+import pandas as pd
 
 # Full team name to nflverse abbreviation (includes historical names)
 TEAM_NAME_TO_ABBR = {
@@ -78,11 +80,17 @@ def load_betting_data(
     max_season: Optional[int] = None,
 ) -> pd.DataFrame:
     """Load betting data from Kaggle spreadspoke dataset."""
-    df = pd.read_csv(filepath or Path("data/raw/spreadspoke_scores.csv"))
+    path = filepath or Path("data/raw/spreadspoke_scores.csv")
+    try:
+        df = pd.read_csv(path)
+    except FileNotFoundError:
+        raise FileNotFoundError(
+            f"{path} not found. Place the spreadspoke_scores.csv file in data/raw/."
+        ) from None
 
-    if min_season:
+    if min_season is not None:
         df = df[df["schedule_season"] >= min_season]
-    if max_season:
+    if max_season is not None:
         df = df[df["schedule_season"] <= max_season]
 
     # Filter to numeric weeks (exclude playoff rounds)
@@ -91,9 +99,11 @@ def load_betting_data(
     df["schedule_week"] = df["schedule_week"].astype(int)
 
     # Normalize team names/abbreviations
-    convert = lambda n: (
-        normalize_team_abbr(TEAM_NAME_TO_ABBR.get(n, n)) if pd.notna(n) else n
-    )
+    def convert(name: object) -> object:
+        if pd.isna(name):
+            return name
+        return normalize_team_abbr(TEAM_NAME_TO_ABBR.get(name, name))
+
     for col in ["team_home", "team_away"] + (
         ["team_favorite_id"] if "team_favorite_id" in df.columns else []
     ):

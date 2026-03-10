@@ -147,7 +147,9 @@ def _identify_underdog(row: pd.Series) -> str | None:
     favorite = row["team_favorite_id"]
     if favorite == row["home_team"]:
         return row["away_team"]
-    return row["home_team"]
+    if favorite == row["away_team"]:
+        return row["home_team"]
+    return None
 
 
 def calculate_upset_target(df: pd.DataFrame) -> pd.DataFrame:
@@ -185,14 +187,16 @@ def calculate_upset_target(df: pd.DataFrame) -> pd.DataFrame:
         result.loc[labelable, "winner"] == result.loc[labelable, "underdog"]
     ).astype(float)
 
-    result["upset_tier"] = np.select(
-        [
-            spread_abs.between(3, 6.5, inclusive="both"),
-            spread_abs.between(7, 13.5, inclusive="both"),
-            spread_abs >= 14,
-        ],
-        ["tier_1", "tier_2", "tier_3"],
-        default=None,
+    result["upset_tier"] = pd.Categorical(
+        np.select(
+            [
+                spread_abs.between(3, 6.5, inclusive="both"),
+                spread_abs.between(7, 13.5, inclusive="both"),
+                spread_abs >= 14,
+            ],
+            ["tier_1", "tier_2", "tier_3"],
+            default="unlabeled",
+        )
     )
 
     return result
@@ -297,10 +301,13 @@ def _calculate_team_rollups(
         ).std()
         result.loc[idx0, f"{col}_std_roll{window}"] = np.nan
 
-        result[f"{col}_trend"] = shifted - shifted.rolling(
-            window=window,
-            min_periods=1,
-        ).mean()
+        result[f"{col}_trend"] = (
+            shifted
+            - shifted.rolling(
+                window=window,
+                min_periods=1,
+            ).mean()
+        )
         result.loc[idx0, f"{col}_trend"] = np.nan
 
     # Per-game lag features for XGBoost: individual stats from last 1, 2, 3 games.
@@ -423,9 +430,11 @@ class FeatureEngineeringPipeline:
         away_rest = _get_numeric_series(result, "away_rest")
         result["divisional_game"] = (
             pd.to_numeric(
-                result["div_game"]
-                if "div_game" in result.columns
-                else pd.Series(0.0, index=result.index),
+                (
+                    result["div_game"]
+                    if "div_game" in result.columns
+                    else pd.Series(0.0, index=result.index)
+                ),
                 errors="coerce",
             )
             .fillna(0.0)
@@ -471,12 +480,6 @@ class FeatureEngineeringPipeline:
             "success_rate_trend",
         ]
         # Per-game lag stats for XGBoost (internal column names in team rollups)
-        lag_stats = [
-            f"{stat}_last{lag}"
-            for lag in [1, 2, 3]
-            for stat in _XGB_GAME_STATS
-        ]  # 12 internal lag columns
-
         for prefix in ["underdog", "favorite"]:
             for stat in rolling_stats:
                 result[f"{prefix}_{stat}"] = np.nan
@@ -514,7 +517,9 @@ class FeatureEngineeringPipeline:
             result["underdog_success_rate_roll3"]
             - result["favorite_success_rate_roll3"]
         )
-        result["cpoe_diff"] = result["underdog_cpoe_roll3"] - result["favorite_cpoe_roll3"]
+        result["cpoe_diff"] = (
+            result["underdog_cpoe_roll3"] - result["favorite_cpoe_roll3"]
+        )
         result["turnover_margin_diff"] = (
             result["underdog_turnover_margin_roll3"]
             - result["favorite_turnover_margin_roll3"]
@@ -554,7 +559,9 @@ class FeatureEngineeringPipeline:
         # Fill NaN with 0.0 for all feature columns (base + XGB extras)
         all_feature_cols = set(FEATURE_COLUMNS + _XGB_PER_GAME_GROUP)
         for feature in all_feature_cols:
-            result[feature] = pd.to_numeric(result[feature], errors="coerce").fillna(0.0)
+            result[feature] = pd.to_numeric(result[feature], errors="coerce").fillna(
+                0.0
+            )
 
         return result
 

@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-import pandas as pd
-import numpy as np
-from typing import Protocol, Any, Dict, List
-from sklearn.metrics import roc_auc_score, log_loss, brier_score_loss
+from typing import Any, Dict, List, Protocol
 
+import numpy as np
+import pandas as pd
+from sklearn.metrics import brier_score_loss
+
+from src.evaluation.metrics import safe_log_loss, safe_roc_auc_score
 from src.models.cv_splitter import TimeSeriesCVSplitter
 
 
@@ -107,8 +109,8 @@ class ModelTrainer:
     ) -> Dict[str, float]:
         """Calculate evaluation metrics."""
         return {
-            "auc_roc": roc_auc_score(y_true, y_pred_proba),
-            "log_loss": log_loss(y_true, y_pred_proba),
+            "auc_roc": safe_roc_auc_score(y_true, y_pred_proba),
+            "log_loss": safe_log_loss(y_true, y_pred_proba),
             "brier_score": brier_score_loss(y_true, y_pred_proba),
         }
 
@@ -121,7 +123,7 @@ class ModelTrainer:
 
         for metric in metric_names:
             values = [f[metric] for f in fold_metrics]
-            aggregated[f"{metric}_mean"] = float(np.mean(values))
-            aggregated[f"{metric}_std"] = float(np.std(values))
+            aggregated[f"{metric}_mean"] = float(np.nanmean(values))
+            aggregated[f"{metric}_std"] = float(np.nanstd(values))
 
         return aggregated

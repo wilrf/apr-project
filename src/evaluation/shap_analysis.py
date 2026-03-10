@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
-import shap
-import pandas as pd
-import numpy as np
 from typing import Dict
+
+import numpy as np
+import pandas as pd
+import shap
+
 from src.models.xgboost_model import UpsetXGBoost
 
 
@@ -23,6 +25,9 @@ def compute_shap_values(
     Returns:
         Array of SHAP values with shape (n_samples, n_features)
     """
+    if model.model is None:
+        raise ValueError("XGBoost model is not fitted. Call fit() before SHAP.")
+
     explainer = shap.TreeExplainer(model.model)
     shap_values = explainer.shap_values(X)
 

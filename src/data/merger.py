@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-import pandas as pd
 from pathlib import Path
-from typing import TypedDict, Tuple
+from typing import Tuple, TypedDict
+
+import pandas as pd
 
 from src.data.betting_loader import normalize_team_abbr
 
@@ -113,4 +114,5 @@ def merge_epa_data(game_df: pd.DataFrame, epa_df: pd.DataFrame) -> pd.DataFrame:
 
 def save_merge_audit(audit: MergeAudit, filepath: Path) -> None:
     """Save merge audit to CSV for review."""
+    filepath.parent.mkdir(parents=True, exist_ok=True)
     audit["unmatched_nfl"].to_csv(filepath, index=False)

@@ -9,12 +9,15 @@ the structural biases of each model type:
 
 from __future__ import annotations
 
-import pandas as pd
-import numpy as np
-from enum import Enum
 from dataclasses import dataclass
-from typing import Dict, List, Optional, TYPE_CHECKING
+from enum import Enum
 from pathlib import Path
+from typing import TYPE_CHECKING, Dict, List, Optional
+
+import numpy as np
+import pandas as pd
+
+from src.evaluation.metrics import safe_probability_correlation
 
 if TYPE_CHECKING:
     from src.models.unified_trainer import GamePrediction
@@ -237,7 +240,7 @@ class DisagreementAnalyzer:
                         "avg_spread": np.mean([p.spread_magnitude for p in preds]),
                         "upset_rate": np.mean([p.y_true for p in preds]),
                         f"avg_{prob_attr.replace('_prob', '')}_confidence": np.mean(
-                            [abs(getattr(p, prob_attr) - 0.5) for p in preds]
+                            [abs(getattr(p, prob_attr) - self.threshold) for p in preds]
                         ),
                     },
                     example_games=[p.game_id for p in preds[:5]],
@@ -256,9 +259,15 @@ class DisagreementAnalyzer:
         if n == 0:
             return pd.DataFrame()
 
-        lr_preds = np.array([p.lr_pred for p in self.predictions])
-        xgb_preds = np.array([p.xgb_pred for p in self.predictions])
-        lstm_preds = np.array([p.lstm_pred for p in self.predictions])
+        lr_preds = np.array(
+            [int(p.lr_prob >= self.threshold) for p in self.predictions]
+        )
+        xgb_preds = np.array(
+            [int(p.xgb_prob >= self.threshold) for p in self.predictions]
+        )
+        lstm_preds = np.array(
+            [int(p.lstm_prob >= self.threshold) for p in self.predictions]
+        )
 
         lr_xgb_agree = (lr_preds == xgb_preds).mean()
         lr_lstm_agree = (lr_preds == lstm_preds).mean()
@@ -291,8 +300,16 @@ class DisagreementAnalyzer:
         xgb_probs = np.array([p.xgb_prob for p in self.predictions])
         lstm_probs = np.array([p.lstm_prob for p in self.predictions])
 
-        data = np.column_stack([lr_probs, xgb_probs, lstm_probs])
-        corr = np.corrcoef(data.T)
+        lr_xgb = safe_probability_correlation(lr_probs, xgb_probs)
+        lr_lstm = safe_probability_correlation(lr_probs, lstm_probs)
+        xgb_lstm = safe_probability_correlation(xgb_probs, lstm_probs)
+        corr = np.array(
+            [
+                [1.0, lr_xgb, lr_lstm],
+                [lr_xgb, 1.0, xgb_lstm],
+                [lr_lstm, xgb_lstm, 1.0],
+            ]
+        )
 
         return pd.DataFrame(
             corr,
@@ -311,9 +328,7 @@ class DisagreementAnalyzer:
 
         # Invert: pred -> category (O(n) instead of O(n*k) per row)
         pred_to_cat = {
-            id(pred): cat.value
-            for cat, preds in categories.items()
-            for pred in preds
+            id(pred): cat.value for cat, preds in categories.items() for pred in preds
         }
 
         rows = []
@@ -332,12 +347,16 @@ class DisagreementAnalyzer:
                     "lr_prob": pred.lr_prob,
                     "xgb_prob": pred.xgb_prob,
                     "lstm_prob": pred.lstm_prob,
-                    "lr_pred": pred.lr_pred,
-                    "xgb_pred": pred.xgb_pred,
-                    "lstm_pred": pred.lstm_pred,
-                    "lr_correct": int(pred.lr_pred == pred.y_true),
-                    "xgb_correct": int(pred.xgb_pred == pred.y_true),
-                    "lstm_correct": int(pred.lstm_pred == pred.y_true),
+                    "lr_pred": int(pred.lr_prob >= self.threshold),
+                    "xgb_pred": int(pred.xgb_prob >= self.threshold),
+                    "lstm_pred": int(pred.lstm_prob >= self.threshold),
+                    "lr_correct": int((pred.lr_prob >= self.threshold) == pred.y_true),
+                    "xgb_correct": int(
+                        (pred.xgb_prob >= self.threshold) == pred.y_true
+                    ),
+                    "lstm_correct": int(
+                        (pred.lstm_prob >= self.threshold) == pred.y_true
+                    ),
                     "category": category,
                 }
             )

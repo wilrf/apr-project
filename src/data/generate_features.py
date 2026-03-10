@@ -27,6 +27,14 @@ TEST_SEASONS = list(range(2023, 2026))  # 2023-2025
 ALL_SEASONS = TRAIN_SEASONS + TEST_SEASONS
 
 
+def _atomic_write_csv(df: pd.DataFrame, output_path: Path) -> None:
+    """Write a CSV via a temporary file, then atomically replace the target."""
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = output_path.with_suffix(output_path.suffix + ".tmp")
+    df.to_csv(temp_path, index=False)
+    temp_path.replace(output_path)
+
+
 def validate_dataset(df: pd.DataFrame, label: str) -> None:
     """
     Strict validation of a feature dataset. Raises on any violation.
@@ -78,8 +86,11 @@ def validate_dataset(df: pd.DataFrame, label: str) -> None:
     missing = [f for f in all_features if f not in labeled.columns]
     if missing:
         raise ValueError(f"{label}: missing feature columns: {missing}")
-    print(f"   [PASS] All {len(all_features)} feature columns present "
-          f"({len(FEATURE_COLUMNS)} base + {len(all_features) - len(FEATURE_COLUMNS)} XGB)")
+    print(
+        f"   [PASS] All {len(all_features)} feature columns present "
+        f"({len(FEATURE_COLUMNS)} base + "
+        f"{len(all_features) - len(FEATURE_COLUMNS)} XGB)"
+    )
 
     # Check 5: No NaN/inf in features for labeled games
     feature_data = labeled[all_features]
@@ -123,8 +134,10 @@ def validate_no_overlap(train: pd.DataFrame, test: pd.DataFrame) -> None:
     overlap = train_seasons & test_seasons
     if overlap:
         raise ValueError(f"Season overlap between train and test: {overlap}")
-    print(f"   [PASS] No season overlap (train ends {max(train_seasons)}, "
-          f"test starts {min(test_seasons)})")
+    print(
+        f"   [PASS] No season overlap (train ends {max(train_seasons)}, "
+        f"test starts {min(test_seasons)})"
+    )
 
 
 def main():
@@ -188,8 +201,8 @@ def main():
     # Step 9: Save
     print("\n9. Saving CSVs...")
     FEATURES_DIR.mkdir(parents=True, exist_ok=True)
-    train.to_csv(FEATURES_DIR / "train.csv", index=False)
-    test.to_csv(FEATURES_DIR / "test.csv", index=False)
+    _atomic_write_csv(train, FEATURES_DIR / "train.csv")
+    _atomic_write_csv(test, FEATURES_DIR / "test.csv")
     print(f"   Saved {FEATURES_DIR / 'train.csv'} ({len(train)} rows)")
     print(f"   Saved {FEATURES_DIR / 'test.csv'} ({len(test)} rows)")
 

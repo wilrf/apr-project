@@ -1,12 +1,15 @@
 """Report generation utilities for model comparison."""
 
 from __future__ import annotations
-import numpy as np
-import pandas as pd
-from typing import Dict, Any, Optional, List, TYPE_CHECKING
-from pathlib import Path
+
 from datetime import datetime
 from itertools import combinations
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
+
+import numpy as np
+
+from src.evaluation.metrics import safe_probability_correlation
 
 if TYPE_CHECKING:
     from src.evaluation.disagreement import DisagreementAnalyzer
@@ -24,10 +27,36 @@ class ReportGenerator:
         self,
         model_results: Dict[str, Dict[str, Any]],
         disagreement_analyzer: Optional["DisagreementAnalyzer"] = None,
+        threshold: Optional[float] = None,
     ):
         self.model_results = model_results
         self.model_names = list(model_results.keys())
         self.disagreement_analyzer = disagreement_analyzer
+
+        # Threshold: explicit > analyzer > compute from data.
+        # If both are provided they must agree, otherwise the report would
+        # use one threshold for its own comparisons and a different one for
+        # the disagreement section (which delegates to the analyzer).
+        if threshold is not None and disagreement_analyzer is not None:
+            if not np.isclose(threshold, disagreement_analyzer.threshold):
+                raise ValueError(
+                    f"Explicit threshold ({threshold}) conflicts with "
+                    "disagreement_analyzer.threshold "
+                    f"({disagreement_analyzer.threshold}). "
+                    f"Pass only one, or ensure they match."
+                )
+            self.threshold = threshold
+        elif threshold is not None:
+            self.threshold = threshold
+        elif disagreement_analyzer is not None:
+            self.threshold = disagreement_analyzer.threshold
+        else:
+            # Compute base rate from y_true across models
+            all_y = [
+                y for r in model_results.values() if "y_true" in r for y in r["y_true"]
+            ]
+            self.threshold = float(np.mean(all_y)) if all_y else 0.5
+
         self._summary = None
 
     def generate_summary(self) -> Dict[str, Any]:
@@ -48,12 +77,13 @@ class ReportGenerator:
             }
             if "y_pred" in result:
                 y = np.array(result["y_pred"])
-                model_summary["prediction_stats"] = {
-                    "mean": float(y.mean()),
-                    "std": float(y.std()),
-                    "min": float(y.min()),
-                    "max": float(y.max()),
-                }
+                if len(y) > 0:
+                    model_summary["prediction_stats"] = {
+                        "mean": float(y.mean()),
+                        "std": float(y.std()),
+                        "min": float(y.min()),
+                        "max": float(y.max()),
+                    }
             summary["models"][name] = model_summary
 
         if len(self.model_names) >= 2:
@@ -103,14 +133,19 @@ class ReportGenerator:
                 pa, pb = predictions[model_a], predictions[model_b]
                 pair_key = f"{model_a}_vs_{model_b}"
                 comparison["pairwise"][pair_key] = {
-                    "prediction_correlation": float(np.corrcoef(pa, pb)[0, 1]),
-                    "agreement_rate": float(((pa >= 0.5) == (pb >= 0.5)).mean()),
+                    "prediction_correlation": safe_probability_correlation(pa, pb),
+                    "agreement_rate": float(
+                        ((pa >= self.threshold) == (pb >= self.threshold)).mean()
+                    ),
                 }
 
             # All-model agreement if 3+ models
             if len(predictions) >= 3:
                 preds_matrix = np.column_stack(
-                    [(predictions[m] >= 0.5).astype(int) for m in predictions]
+                    [
+                        (predictions[m] >= self.threshold).astype(int)
+                        for m in predictions
+                    ]
                 )
                 all_agree = (preds_matrix.std(axis=1) == 0).mean()
                 comparison["agreement"]["all_models"] = float(all_agree)
@@ -192,17 +227,21 @@ class ReportGenerator:
                     lines.append(f"**{pair}:**")
                     if "prediction_correlation" in stats:
                         lines.append(
-                            f"  - Prediction Correlation: {stats['prediction_correlation']:.3f}"
+                            "  - Prediction Correlation: "
+                            f"{stats['prediction_correlation']:.3f}"
                         )
                     if "agreement_rate" in stats:
                         lines.append(
-                            f"  - Classification Agreement: {stats['agreement_rate']:.1%}"
+                            "  - Classification Agreement: "
+                            f"{stats['agreement_rate']:.1%}"
                         )
                     lines.append("")
 
             if s["comparison"].get("agreement", {}).get("all_models"):
                 lines.append(
-                    f"**All Models Agree:** {s['comparison']['agreement']['all_models']:.1%} of predictions"
+                    "**All Models Agree:** "
+                    f"{s['comparison']['agreement']['all_models']:.1%} "
+                    "of predictions"
                 )
                 lines.append("")
 
@@ -233,7 +272,8 @@ class ReportGenerator:
         lines = [
             "## Disagreement Analysis",
             "",
-            "This section analyzes where models agree and disagree, revealing each model's structural biases.",
+            "This section analyzes where models agree and disagree, "
+            "revealing each model's structural biases.",
             "",
             "### Category Breakdown",
             "",
@@ -243,7 +283,8 @@ class ReportGenerator:
 
         for stat in disagreement.get("category_stats", []):
             lines.append(
-                f"| {stat['category']} | {stat['count']} | {stat['pct_of_total']:.1f}% | "
+                f"| {stat['category']} | {stat['count']} | "
+                f"{stat['pct_of_total']:.1f}% | "
                 f"{stat['upset_rate']:.1%} |"
             )
         lines.append("")
@@ -292,9 +333,10 @@ def generate_report(
     model_results: Dict[str, Dict[str, Any]],
     output_path: Optional[Path] = None,
     disagreement_analyzer: Optional["DisagreementAnalyzer"] = None,
+    threshold: Optional[float] = None,
 ) -> Dict[str, Any]:
     """Convenience function to generate a report."""
-    gen = ReportGenerator(model_results, disagreement_analyzer)
+    gen = ReportGenerator(model_results, disagreement_analyzer, threshold=threshold)
     if output_path:
         gen.export_markdown(output_path)
     return gen.generate_summary()

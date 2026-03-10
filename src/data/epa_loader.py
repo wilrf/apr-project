@@ -1,10 +1,13 @@
-"""Game-level advanced stats extracted from nfl_data_py play-by-play."""
+"""Game-level advanced stats extracted from nflverse play-by-play data."""
 
 from __future__ import annotations
 
-from typing import List
+import json
+import socket
+from contextlib import contextmanager
+from typing import Iterator, List
+from urllib.request import Request, urlopen
 
-import nfl_data_py as nfl
 import numpy as np
 import pandas as pd
 
@@ -26,6 +29,112 @@ _PBP_COLUMNS = [
     "total_home_rush_epa",
     "total_away_rush_epa",
 ]
+PBP_URL_TEMPLATE = (
+    "https://github.com/nflverse/nflverse-data/releases/download/pbp/"
+    "play_by_play_{season}.parquet"
+)
+_DOH_ENDPOINTS = (
+    "https://dns.google/resolve?name={host}&type=A",
+    "https://cloudflare-dns.com/dns-query?name={host}&type=A",
+)
+_GITHUB_HOSTS = ("github.com", "api.github.com")
+
+
+def _resolve_host_via_doh(host: str) -> str:
+    """Resolve a host via DNS-over-HTTPS when local DNS is unavailable."""
+    headers = {"accept": "application/dns-json"}
+    for url_template in _DOH_ENDPOINTS:
+        request = Request(url_template.format(host=host), headers=headers)
+        try:
+            with urlopen(request, timeout=15) as response:
+                payload = json.load(response)
+        except Exception:
+            continue
+
+        for answer in payload.get("Answer", []):
+            if answer.get("type") == 1 and answer.get("data"):
+                return str(answer["data"])
+
+    raise RuntimeError(f"Failed to resolve {host} via DNS-over-HTTPS.")
+
+
+@contextmanager
+def _github_dns_override() -> Iterator[None]:
+    """
+    Patch GitHub host resolution only when local DNS fails.
+
+    Some environments can reach GitHub release assets but cannot resolve github.com.
+    """
+    original_getaddrinfo = socket.getaddrinfo
+    overrides: dict[str, str] = {}
+
+    for host in _GITHUB_HOSTS:
+        try:
+            original_getaddrinfo(host, 443)
+        except OSError:
+            overrides[host] = _resolve_host_via_doh(host)
+
+    if not overrides:
+        yield
+        return
+
+    def patched_getaddrinfo(
+        host: str,
+        port: int,
+        family: int = 0,
+        type: int = 0,
+        proto: int = 0,
+        flags: int = 0,
+    ):
+        override_ip = overrides.get(host)
+        if override_ip is not None:
+            return original_getaddrinfo(override_ip, port, family, type, proto, flags)
+        return original_getaddrinfo(host, port, family, type, proto, flags)
+
+    socket.getaddrinfo = patched_getaddrinfo
+    try:
+        yield
+    finally:
+        socket.getaddrinfo = original_getaddrinfo
+
+
+def _load_pbp_data(seasons: List[int]) -> pd.DataFrame:
+    """Load play-by-play parquet files directly from nflverse releases."""
+    frames = []
+
+    with _github_dns_override():
+        for season in seasons:
+            try:
+                frame = pd.read_parquet(
+                    PBP_URL_TEMPLATE.format(season=season),
+                    columns=_PBP_COLUMNS,
+                )
+            except Exception as e:
+                raise RuntimeError(
+                    "Failed to load play-by-play data for "
+                    f"season {season} from nflverse: {e}"
+                ) from e
+
+            if frame.empty:
+                raise RuntimeError(
+                    "Failed to load play-by-play data for "
+                    f"season {season} from nflverse: empty dataset returned."
+                )
+
+            frames.append(frame)
+
+    if not frames:
+        raise RuntimeError("Failed to load play-by-play data: no seasons were loaded.")
+
+    pbp = pd.concat(frames, ignore_index=True)
+    missing_columns = sorted(set(_PBP_COLUMNS) - set(pbp.columns))
+    if missing_columns:
+        raise RuntimeError(
+            "Failed to load play-by-play data from nflverse. "
+            f"Missing required columns: {missing_columns}"
+        )
+
+    return pbp
 
 
 def _build_cumulative_epa_frame(pbp: pd.DataFrame) -> pd.DataFrame:
@@ -131,7 +240,7 @@ def load_game_advanced_stats(seasons: List[int]) -> pd.DataFrame:
     Returns:
         DataFrame with one row per game and home/away advanced stats.
     """
-    pbp = nfl.import_pbp_data(seasons, columns=_PBP_COLUMNS)
+    pbp = _load_pbp_data(seasons)
 
     game_epa = _build_cumulative_epa_frame(pbp).rename(
         columns={

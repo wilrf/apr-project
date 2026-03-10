@@ -93,6 +93,27 @@ class TestCalculateUpsetTarget:
         result = calculate_upset_target(sample_games)
         assert result.loc[result["game_id"] == "g3", "upset"].item() == 1.0
 
+    def test_favorite_win_has_zero_upset_target(self):
+        games = pd.DataFrame(
+            {
+                "game_id": ["g6"],
+                "home_team": ["KC"],
+                "away_team": ["DET"],
+                "home_score": [31],
+                "away_score": [17],
+                "spread_favorite": [-6.0],
+                "team_favorite_id": ["KC"],
+            }
+        )
+
+        result = calculate_upset_target(games)
+        row = result.iloc[0]
+
+        assert row["favorite"] == "KC"
+        assert row["underdog"] == "DET"
+        assert row["winner"] == "KC"
+        assert row["upset"] == 0.0
+
     def test_ties_have_missing_target(self, sample_games):
         result = calculate_upset_target(sample_games)
         assert pd.isna(result.loc[result["game_id"] == "g4", "upset"].item())

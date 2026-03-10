@@ -12,7 +12,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import torch
-from sklearn.metrics import brier_score_loss, log_loss, roc_auc_score
+from sklearn.metrics import brier_score_loss
 
 from src.evaluation.calibration import (
     calibrate_models,
@@ -22,12 +22,15 @@ from src.evaluation.disagreement import DisagreementAnalyzer, PredictionCategory
 from src.evaluation.metrics import (
     calculate_baseline_brier,
     calculate_calibration_metrics,
+    safe_log_loss,
+    safe_quantile_buckets,
+    safe_roc_auc_score,
 )
 from src.features import pipeline
 from src.features.pipeline import get_xgb_feature_columns
 from src.models.lstm_config import TUNED_LSTM_TRAINING_PARAMS
 from src.models.sequence_builder import build_siamese_sequences
-from src.models.unified_trainer import GamePrediction, UnifiedTrainer
+from src.models.unified_trainer import GamePrediction, UnifiedTrainer, _safe_team_str
 
 # Paths
 DATA_DIR = Path("data/features")
@@ -40,8 +43,15 @@ CV_CATEGORIES = None
 
 def load_data():
     """Load train, test, and feature column data."""
-    train_df = pd.read_csv(DATA_DIR / "train.csv")
-    test_df = pd.read_csv(DATA_DIR / "test.csv")
+    train_path = DATA_DIR / "train.csv"
+    test_path = DATA_DIR / "test.csv"
+    for path in (train_path, test_path):
+        if not path.exists():
+            raise FileNotFoundError(
+                f"{path} not found. Run 'python3 -m src.data.generate_features' first."
+            )
+    train_df = pd.read_csv(train_path, low_memory=False)
+    test_df = pd.read_csv(test_path, low_memory=False)
     feature_cols = pipeline.get_feature_columns()  # 46 for LR
     xgb_feature_cols = get_xgb_feature_columns()  # 70 for XGB
     return train_df, test_df, feature_cols, xgb_feature_cols
@@ -50,6 +60,13 @@ def load_data():
 def filter_valid_upsets(df: pd.DataFrame) -> pd.DataFrame:
     """Filter to games with valid upset targets."""
     return df[df["upset"].notna()].copy()
+
+
+def build_prediction_history(
+    train_df: pd.DataFrame, test_df: pd.DataFrame
+) -> pd.DataFrame:
+    """Build the full history available at test time for LSTM sequences."""
+    return pd.concat([train_df, test_df], ignore_index=True)
 
 
 def verify_data(train_df, test_df):
@@ -90,7 +107,9 @@ def verify_data(train_df, test_df):
         raise ValueError(f"Season overlap detected: {overlap}")
 
 
-def generate_predictions(models, test_df, feature_cols, xgb_feature_cols):
+def generate_predictions(
+    models, test_df, feature_cols, xgb_feature_cols, full_history_df=None
+):
     """Generate predictions from all 3 models on test data."""
     test_valid = filter_valid_upsets(test_df)
     X_test_lr = test_valid[feature_cols]
@@ -103,9 +122,12 @@ def generate_predictions(models, test_df, feature_cols, xgb_feature_cols):
     # XGBoost predictions (expanded 70 features)
     xgb_probs = models["xgb_model"].predict_proba(X_test_xgb)
 
-    # LSTM predictions - need sequences
+    # LSTM predictions - need sequences (use full history if available)
     test_seq_data, _ = build_siamese_sequences(
-        test_valid, normalize=True, stats=models["lstm_stats"]
+        test_valid,
+        normalize=True,
+        stats=models["lstm_stats"],
+        history_df=full_history_df,
     )
 
     lstm_model = models["lstm_model"]
@@ -118,7 +140,7 @@ def generate_predictions(models, test_df, feature_cols, xgb_feature_cols):
         fav_mask = torch.FloatTensor(test_seq_data.favorite_masks)
 
         lstm_probs = lstm_model(und_seq, fav_seq, matchup, und_mask, fav_mask)
-        lstm_probs = lstm_probs.squeeze().cpu().numpy()
+        lstm_probs = lstm_probs.squeeze(-1).cpu().numpy()
 
     return test_valid, y_test, lr_probs, xgb_probs, lstm_probs
 
@@ -126,15 +148,17 @@ def generate_predictions(models, test_df, feature_cols, xgb_feature_cols):
 def calculate_metrics(y_true, y_pred):
     """Calculate standard evaluation metrics."""
     return {
-        "auc_roc": float(roc_auc_score(y_true, y_pred)),
+        "auc_roc": safe_roc_auc_score(y_true, y_pred),
         "brier_score": float(brier_score_loss(y_true, y_pred)),
-        "log_loss": float(log_loss(y_true, y_pred)),
+        "log_loss": safe_log_loss(y_true, y_pred),
     }
 
 
 def build_game_predictions(test_df, y_true, lr_probs, xgb_probs, lstm_probs):
     """Build GamePrediction objects for disagreement analysis."""
     predictions = []
+    threshold = float(np.mean(y_true)) if len(y_true) > 0 else 0.5
+
     for i, (idx, row) in enumerate(test_df.iterrows()):
         game_id = row.get(
             "game_id",
@@ -145,13 +169,14 @@ def build_game_predictions(test_df, y_true, lr_probs, xgb_probs, lstm_probs):
                 game_id=game_id,
                 season=int(row["season"]),
                 week=int(row["week"]),
-                underdog=str(row.get("underdog", "")),
-                favorite=str(row.get("favorite", "")),
+                underdog=_safe_team_str(row.get("underdog", "")),
+                favorite=_safe_team_str(row.get("favorite", "")),
                 spread_magnitude=float(row.get("spread_magnitude", 0)),
                 y_true=int(y_true[i]),
                 lr_prob=float(lr_probs[i]),
                 xgb_prob=float(xgb_probs[i]),
                 lstm_prob=float(lstm_probs[i]),
+                classification_threshold=threshold,
             )
         )
     return predictions
@@ -365,7 +390,7 @@ def print_probability_buckets(predictions):
         print(f"\n--- {name} ---")
 
         # Use quintiles (5 equal-sized groups) for clean presentation
-        pred_df["bucket"] = pd.qcut(pred_df[col], q=5, labels=False, duplicates="drop")
+        pred_df["bucket"] = safe_quantile_buckets(pred_df[col], q=5)
         n_buckets = pred_df["bucket"].nunique()
 
         header = (
@@ -376,7 +401,7 @@ def print_probability_buckets(predictions):
         print(header)
         print("-" * len(header))
 
-        for bucket in sorted(pred_df["bucket"].unique()):
+        for bucket in sorted(pred_df["bucket"].dropna().unique()):
             bdf = pred_df[pred_df["bucket"] == bucket]
             prob_min = bdf[col].min()
             prob_max = bdf[col].max()
@@ -396,16 +421,11 @@ def print_probability_buckets(predictions):
                 f"{n_games:>6} {n_upsets:>7} {upset_rate:>9.1%} {avg_prob:>9.3f}"
             )
 
-        pred_df.drop(columns=["bucket"], inplace=True)
-
         # Monotonicity check: does upset rate increase with predicted probability?
         bucket_rates = []
-        pred_df["_temp_bucket"] = pd.qcut(
-            pred_df[col], q=5, labels=False, duplicates="drop"
-        )
-        for b in sorted(pred_df["_temp_bucket"].unique()):
-            bucket_rates.append(pred_df[pred_df["_temp_bucket"] == b]["y_true"].mean())
-        pred_df.drop(columns=["_temp_bucket"], inplace=True)
+        for b in sorted(pred_df["bucket"].dropna().unique()):
+            bucket_rates.append(pred_df[pred_df["bucket"] == b]["y_true"].mean())
+        pred_df.drop(columns=["bucket"], inplace=True)
 
         monotonic_pairs = sum(
             1
@@ -452,12 +472,12 @@ def print_per_season_breakdown(predictions):
             ("LSTM", "lstm_prob"),
         ]:
             probs = sdf[col].values
-            try:
-                auc = roc_auc_score(y, probs)
-                brier = brier_score_loss(y, probs)
-                print(f"  {model_name}: AUC={auc:.3f}, Brier={brier:.3f}")
-            except ValueError:
+            auc = safe_roc_auc_score(y, probs)
+            brier = brier_score_loss(y, probs)
+            if np.isnan(auc):
                 print(f"  {model_name}: insufficient data for AUC")
+            else:
+                print(f"  {model_name}: AUC={auc:.3f}, Brier={brier:.3f}")
 
 
 def save_predictions_csv(predictions, output_path):
@@ -470,9 +490,13 @@ def save_predictions_csv(predictions, output_path):
     pred_to_cat = {}
     for cat, preds in categories.items():
         for p in preds:
-            pred_to_cat[id(p)] = cat.value
+            pred_to_cat[p.game_id] = cat.value
 
+    threshold = analyzer.threshold
     for p in predictions:
+        lr_pred = int(p.lr_prob >= threshold)
+        xgb_pred = int(p.xgb_prob >= threshold)
+        lstm_pred = int(p.lstm_prob >= threshold)
         rows.append(
             {
                 "game_id": p.game_id,
@@ -485,13 +509,13 @@ def save_predictions_csv(predictions, output_path):
                 "lr_prob": p.lr_prob,
                 "xgb_prob": p.xgb_prob,
                 "lstm_prob": p.lstm_prob,
-                "lr_pred": p.lr_pred,
-                "xgb_pred": p.xgb_pred,
-                "lstm_pred": p.lstm_pred,
-                "lr_correct": int(p.lr_pred == p.y_true),
-                "xgb_correct": int(p.xgb_pred == p.y_true),
-                "lstm_correct": int(p.lstm_pred == p.y_true),
-                "category": pred_to_cat.get(id(p), "unknown"),
+                "lr_pred": lr_pred,
+                "xgb_pred": xgb_pred,
+                "lstm_pred": lstm_pred,
+                "lr_correct": int(lr_pred == p.y_true),
+                "xgb_correct": int(xgb_pred == p.y_true),
+                "lstm_correct": int(lstm_pred == p.y_true),
+                "category": pred_to_cat.get(p.game_id, "unknown"),
             }
         )
 
@@ -675,9 +699,9 @@ def save_report_md(test_metrics, cv_metrics, analyzer, predictions, output_path)
             "|----------|-----------|-------|--------|------------|----------|"
         )
 
-        topk_df["_bucket"] = pd.qcut(topk_df[col], q=5, labels=False, duplicates="drop")
+        topk_df["_bucket"] = safe_quantile_buckets(topk_df[col], q=5)
         n_buckets = topk_df["_bucket"].nunique()
-        for bucket in sorted(topk_df["_bucket"].unique()):
+        for bucket in sorted(topk_df["_bucket"].dropna().unique()):
             bdf = topk_df[topk_df["_bucket"] == bucket]
             prob_min = bdf[col].min()
             prob_max = bdf[col].max()
@@ -727,12 +751,12 @@ def save_report_md(test_metrics, cv_metrics, analyzer, predictions, output_path)
             ("LSTM", "lstm_prob"),
         ]:
             probs = sdf[col].values
-            try:
-                auc = roc_auc_score(y, probs)
-                brier = brier_score_loss(y, probs)
-                lines.append(f"| {model_name} | {auc:.3f} | {brier:.3f} |")
-            except ValueError:
+            auc = safe_roc_auc_score(y, probs)
+            brier = brier_score_loss(y, probs)
+            if np.isnan(auc):
                 lines.append(f"| {model_name} | N/A | N/A |")
+            else:
+                lines.append(f"| {model_name} | {auc:.3f} | {brier:.3f} |")
         lines.append("")
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -777,12 +801,18 @@ def main():
         lstm_batch_size=int(TUNED_LSTM_TRAINING_PARAMS["batch_size"]),
         verbose=True,
         xgb_feature_cols=xgb_feature_cols,
+        full_df=train_df,
     )
 
     # Generate test predictions (raw)
     print("\nGenerating test predictions...")
+    prediction_history = build_prediction_history(train_df, test_df)
     test_pred_df, y_test, lr_probs, xgb_probs, lstm_probs = generate_predictions(
-        models, test_valid, feature_cols, xgb_feature_cols
+        models,
+        test_valid,
+        feature_cols,
+        xgb_feature_cols,
+        full_history_df=prediction_history,
     )
 
     # Post-hoc calibration via Platt scaling
@@ -793,7 +823,10 @@ def main():
     print("Fitting calibrators on 2021-2022 held-out predictions...")
 
     cal_probs, cal_y = generate_calibration_predictions(
-        train_valid, feature_cols, cal_seasons=(2021, 2022)
+        train_df,
+        feature_cols,
+        cal_seasons=(2021, 2022),
+        xgb_feature_cols=xgb_feature_cols,
     )
     cal_results = calibrate_models(
         cal_probs,

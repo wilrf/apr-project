@@ -14,6 +14,7 @@ from src.models.sequence_builder import (
     SiameseLSTMData,
     _build_team_game_history,
     _get_team_sequence,
+    _normalize_sequences,
     build_siamese_sequences,
 )
 
@@ -206,11 +207,12 @@ class TestBuildTeamGameHistory:
     def test_creates_history_for_all_teams(self, sample_game_data):
         history = _build_team_game_history(sample_game_data)
         for team in {"KC", "BUF", "PHI", "DAL"}:
-            assert (team, 2023) in history
+            assert team in history
 
     def test_history_contains_derived_sequence_fields(self, sample_game_data):
         history = _build_team_game_history(sample_game_data)
-        kc_week2 = history[("KC", 2023)][history[("KC", 2023)]["week"] == 2].iloc[0]
+        kc = history["KC"]
+        kc_week2 = kc[(kc["season"] == 2023) & (kc["week"] == 2)].iloc[0]
 
         assert kc_week2["points_scored"] == 28
         assert kc_week2["points_allowed"] == 24
@@ -237,8 +239,8 @@ class TestBuildTeamGameHistory:
             )
         )
 
-        assert history[("KC", 2023)].iloc[0]["days_since_last_game"] == 7.0
-        assert history[("BUF", 2023)].iloc[0]["days_since_last_game"] == 7.0
+        assert history["KC"].iloc[0]["days_since_last_game"] == 7.0
+        assert history["BUF"].iloc[0]["days_since_last_game"] == 7.0
 
 
 class TestGetTeamSequence:
@@ -277,7 +279,8 @@ class TestGetTeamSequence:
 
     def test_missing_sequence_values_are_zero_filled(self, sample_game_data):
         history = _build_team_game_history(sample_game_data)
-        history[("KC", 2023)].loc[history[("KC", 2023)]["week"] == 2, "cpoe"] = np.nan
+        kc = history["KC"]
+        history["KC"].loc[(kc["season"] == 2023) & (kc["week"] == 2), "cpoe"] = np.nan
 
         seq, _ = _get_team_sequence("KC", 2023, 3, history)
         cpoe_idx = SEQUENCE_FEATURES.index("cpoe")
@@ -361,6 +364,204 @@ class TestBuildSiameseSequences:
             train_data.matchup_features,
             reapplied_data.matchup_features,
         )
+
+    def test_normalization_ignores_nan_values_when_computing_stats(self):
+        sequences = np.array(
+            [
+                [[np.nan], [1.0]],
+                [[2.0], [3.0]],
+            ],
+            dtype=np.float32,
+        )
+        masks = np.ones((2, 2), dtype=np.float32)
+
+        normalized, stats = _normalize_sequences(sequences, masks, ["feature"])
+
+        mean, std = stats["feature"]
+        assert mean == pytest.approx(2.0)
+        assert std == pytest.approx(np.std([1.0, 2.0, 3.0]))
+        assert np.isfinite(mean)
+        assert np.isfinite(std)
+        assert np.isfinite(normalized[0, 1, 0])
+        assert np.isfinite(normalized[1, 0, 0])
+        assert np.isfinite(normalized[1, 1, 0])
+
+    def test_provided_stats_must_cover_all_sequence_features(self, sample_game_data):
+        incomplete = NormalizationStats(
+            sequence_stats={"total_epa": (0.0, 1.0)},
+            matchup_stats={name: (0.0, 1.0) for name in MATCHUP_FEATURES},
+        )
+
+        with pytest.raises(ValueError, match="Missing sequence normalization stats"):
+            build_siamese_sequences(
+                sample_game_data,
+                normalize=True,
+                stats=incomplete,
+            )
+
+    def test_provided_stats_must_cover_all_matchup_features(self, sample_game_data):
+        incomplete = NormalizationStats(
+            sequence_stats={name: (0.0, 1.0) for name in SEQUENCE_FEATURES},
+            matchup_stats={"spread_magnitude": (0.0, 1.0)},
+        )
+
+        with pytest.raises(ValueError, match="Missing matchup normalization stats"):
+            build_siamese_sequences(
+                sample_game_data,
+                normalize=True,
+                stats=incomplete,
+            )
+
+    def test_labeled_games_with_missing_roles_raise(self, sample_game_data):
+        broken = sample_game_data.copy()
+        broken.loc[0, "underdog"] = np.nan
+
+        with pytest.raises(ValueError, match="missing favorite/underdog"):
+            build_siamese_sequences(broken, normalize=False)
+
+    def test_history_source_without_usable_scores_raises(self, sample_game_data):
+        broken = sample_game_data.drop(columns=["home_score", "away_score"])
+
+        with pytest.raises(ValueError, match="No usable team history"):
+            build_siamese_sequences(broken, normalize=False)
+
+    def test_tied_games_encode_half_win_in_history(self):
+        history = _build_team_game_history(
+            pd.DataFrame(
+                {
+                    "season": [2023],
+                    "week": [2],
+                    "home_team": ["KC"],
+                    "away_team": ["BUF"],
+                    "home_score": [24],
+                    "away_score": [24],
+                }
+            )
+        )
+
+        assert history["KC"].iloc[0]["win"] == pytest.approx(0.5)
+        assert history["BUF"].iloc[0]["win"] == pytest.approx(0.5)
+
+
+class TestCrossSeasonHistory:
+    """H3: LSTM sequences should cross season boundaries."""
+
+    @pytest.fixture
+    def cross_season_data(self):
+        """KC plays weeks 16-17 of 2022 and weeks 1-2 of 2023."""
+        data = pd.DataFrame(
+            {
+                "game_id": [
+                    "2022_16_KC_BUF",
+                    "2022_17_KC_DAL",
+                    "2023_01_KC_PHI",
+                    "2023_02_KC_BUF",
+                ],
+                "season": [2022, 2022, 2023, 2023],
+                "week": [16, 17, 1, 2],
+                "home_team": ["KC", "KC", "KC", "KC"],
+                "away_team": ["BUF", "DAL", "PHI", "BUF"],
+                "home_score": [28, 31, 24, 30],
+                "away_score": [24, 17, 21, 17],
+                "spread_favorite": [-7.0, -6.0, -4.0, -5.0],
+                "favorite": ["KC", "KC", "KC", "KC"],
+                "underdog": ["BUF", "DAL", "PHI", "BUF"],
+                "upset": [0.0, 0.0, 0.0, 0.0],
+                "home_rest": [7, 7, 10, 7],
+                "away_rest": [7, 7, 10, 7],
+                "home_off_pass_epa": [15.0, 18.0, 12.0, 16.0],
+                "home_off_rush_epa": [3.0, 5.0, 3.0, 4.0],
+                "away_off_pass_epa": [12.0, 7.0, 11.0, 8.0],
+                "away_off_rush_epa": [2.8, 1.5, 3.0, 1.8],
+                "home_success_rate": [0.48, 0.50, 0.47, 0.53],
+                "away_success_rate": [0.51, 0.41, 0.50, 0.43],
+                "home_cpoe": [1.2, 0.7, 0.4, 1.4],
+                "away_cpoe": [2.1, -0.7, 1.0, -1.2],
+                "home_turnover_margin": [-1.0, 0.0, 1.0, 1.0],
+                "away_turnover_margin": [1.0, 0.0, 0.0, -1.0],
+            }
+        )
+        return _with_matchup_features(data)
+
+    def test_week1_sees_prior_season(self, cross_season_data):
+        """Week 1 of 2023 should include KC's 2022 history."""
+        result, _ = build_siamese_sequences(cross_season_data, normalize=False)
+
+        # Game index 2 is 2023_01_KC_PHI. KC is favorite.
+        # Before this game KC played 2 games (weeks 16,17 of 2022).
+        fav_mask = result.favorite_masks[2]
+        assert fav_mask.sum() >= 2, "Week 1 should see prior-season games"
+
+    def test_history_keyed_by_team_not_season(self, cross_season_data):
+        """_build_team_game_history should key by team, not (team, season)."""
+        history = _build_team_game_history(cross_season_data)
+        # After H3 fix, keys are team strings, not (team, season) tuples
+        assert "KC" in history
+        assert isinstance(list(history.keys())[0], str)
+
+
+class TestSubThreeSpreadHistory:
+    """H2: Sub-3-spread games should contribute to LSTM team history."""
+
+    @pytest.fixture
+    def mixed_spread_data(self):
+        """Game 1 has sub-3 spread (upset=NaN), games 2-3 are labeled."""
+        data = pd.DataFrame(
+            {
+                "game_id": ["sub3", "labeled1", "labeled2"],
+                "season": [2023, 2023, 2023],
+                "week": [2, 3, 4],
+                "home_team": ["KC", "KC", "KC"],
+                "away_team": ["BUF", "DAL", "PHI"],
+                "home_score": [24, 28, 31],
+                "away_score": [21, 17, 14],
+                "spread_favorite": [-2.0, -7.0, -6.0],
+                "favorite": ["KC", "KC", "KC"],
+                "underdog": ["BUF", "DAL", "PHI"],
+                "upset": [np.nan, 0.0, 0.0],  # game 1 unlabeled
+                "home_rest": [7, 7, 7],
+                "away_rest": [7, 7, 7],
+                "home_off_pass_epa": [15.0, 18.0, 16.0],
+                "home_off_rush_epa": [3.0, 5.0, 4.0],
+                "away_off_pass_epa": [12.0, 7.0, 8.0],
+                "away_off_rush_epa": [2.8, 1.5, 1.8],
+                "home_success_rate": [0.48, 0.50, 0.53],
+                "away_success_rate": [0.51, 0.41, 0.43],
+                "home_cpoe": [1.2, 0.7, 1.4],
+                "away_cpoe": [2.1, -0.7, -1.2],
+                "home_turnover_margin": [-1.0, 0.0, 1.0],
+                "away_turnover_margin": [1.0, 0.0, -1.0],
+            }
+        )
+        return _with_matchup_features(data)
+
+    def test_history_df_includes_unlabeled_games(self, mixed_spread_data):
+        """When history_df has sub-3 games, they appear in team sequences."""
+        labeled_only = mixed_spread_data[mixed_spread_data["upset"].notna()].copy()
+
+        # Without history_df: labeled_only has only weeks 3,4 — week 3 has no prior
+        result_without, _ = build_siamese_sequences(labeled_only, normalize=False)
+        mask_without = result_without.favorite_masks[0]  # week 3, KC
+
+        # With history_df: full data includes week 2 (sub-3 spread)
+        result_with, _ = build_siamese_sequences(
+            labeled_only, normalize=False, history_df=mixed_spread_data
+        )
+        mask_with = result_with.favorite_masks[0]  # week 3, KC
+
+        assert (
+            mask_with.sum() > mask_without.sum()
+        ), "history_df should provide more history via sub-3 games"
+
+    def test_unlabeled_games_not_in_targets(self, mixed_spread_data):
+        """Sub-3 games in history_df must not become training targets."""
+        labeled_only = mixed_spread_data[mixed_spread_data["upset"].notna()].copy()
+        result, _ = build_siamese_sequences(
+            labeled_only, normalize=False, history_df=mixed_spread_data
+        )
+        # Only 2 labeled games should produce samples
+        assert result.n_samples == 2
+        assert not np.isnan(result.targets).any()
 
 
 class TestCanonicalFeatureLists:
