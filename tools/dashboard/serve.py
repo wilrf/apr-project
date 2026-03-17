@@ -1,8 +1,8 @@
 """Live dashboard server. Reads results fresh on each request.
 
 Usage:
-    python3 -m frontend.serve              # http://localhost:8050
-    python3 -m frontend.serve --port 9000  # custom port
+    python3 -m tools.dashboard.serve              # http://localhost:8050
+    python3 -m tools.dashboard.serve --port 9000  # custom port
 """
 
 from __future__ import annotations
@@ -18,9 +18,9 @@ from sklearn.metrics import brier_score_loss
 
 from src.evaluation.metrics import safe_log_loss, safe_roc_auc_score
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[2]
 RESULTS = ROOT / "results"
-FRONTEND = ROOT / "frontend"
+DASHBOARD_DIR = ROOT / "tools" / "dashboard"
 
 DEFAULT_PORT = 8050
 
@@ -139,7 +139,7 @@ def build_payload() -> dict:
 
 class Handler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
-        super().__init__(*args, directory=str(FRONTEND), **kwargs)
+        super().__init__(*args, directory=str(DASHBOARD_DIR), **kwargs)
 
     def do_GET(self):
         if self.path == "/api/data":

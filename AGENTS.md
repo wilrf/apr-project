@@ -89,6 +89,7 @@ data/
   raw/            # Source data files
 docs/
   plans/          # Design specs and implementation plans
+tools/            # Sidecar utilities (dashboard, presentation helpers)
 ```
 
 ## Change-Impact Map

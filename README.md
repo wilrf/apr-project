@@ -106,6 +106,7 @@ src/evaluation/     Metrics, calibration, disagreement analysis, and reports
 data/features/      Generated train/test feature CSVs
 results/            Saved prediction artifacts and reports
 docs/               Paper and presentation materials
+tools/              Sidecar utilities such as the local dashboard and presentation scripts
 ```
 
 ## Reproduce
@@ -114,5 +115,6 @@ docs/               Paper and presentation materials
 python3 -m src.data.generate_features
 python3 -m src.models.run_ab_experiment --quick
 python3 -m src.models.evaluate_test_set
+python3 -m tools.dashboard.serve
 python3 -m pytest tests/ --ignore=tests/models/test_lstm_model.py -v
 ```
