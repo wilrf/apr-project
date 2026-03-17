@@ -1,31 +1,21 @@
 # NFL Upset Taxonomy via Multi-Architecture Disagreement
 
-AP Research project investigating **why** NFL upsets happen using the structure of prediction failure across three architecturally distinct models.
+Most NFL prediction research asks *can we predict upsets better?* This project asks a different question: **why do upsets happen, and what can the structure of prediction failure tell us about them?**
 
-## Research Question
+## The Idea
 
-> How do agreement and disagreement patterns of structurally distinct ML architectures reveal the mechanisms and predictability boundaries of NFL upsets?
+We train three architecturally distinct models — logistic regression, XGBoost, and a siamese LSTM — on the same game data, each in its own representation. Then, instead of picking a winner, we study where they agree and disagree.
 
-## Approach
+When all three models get a game right, the signal was readable from every angle. When only one succeeds, its architectural strength points to the mechanism: spread mispricing, non-linear interactions, or temporal momentum. When none of them get it right, the spread tells us whether it was noise or something outside the data entirely.
 
-Three models process the same game data in architecture-appropriate representations: logistic regression sees summary statistics, XGBoost sees detailed tabular features with per-game lags, and a siamese LSTM sees raw temporal sequences.
-
-This is not a model competition. The disagreement patterns themselves are the finding — they reveal whether an upset was driven by linear mispricing, non-linear interactions, temporal dynamics, or hidden information. The result is a two-dimensional upset taxonomy: model agreement crossed with matchup context (point spread).
+The disagreement is the finding.
 
 ## Project Structure
 
 ```
-src/data/           Data loading (NFL schedules, betting lines, play-by-play EPA)
-src/features/       Feature engineering pipeline and target definition
-src/models/         Model implementations, training, and evaluation scripts
+src/data/           Data loading — NFL schedules, betting lines, play-by-play stats
+src/features/       Feature engineering and target definition
+src/models/         Model implementations, training, and evaluation
 src/evaluation/     Metrics, calibration, disagreement analysis, reporting
-docs/               Research paper, framing notes, presentation materials
-```
-
-## Setup
-
-```bash
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-python3 -m src.data.generate_features
+docs/               Research paper and presentation materials
 ```
