@@ -357,54 +357,117 @@ The analyzer uses the **base upset rate** as its threshold (not 0.5). A model "p
 
 ---
 
-## 8. Current Results (Test Set, 2023-2025)
+## 8. Current Results
 
-*From `results/test/report.md`, generated 2026-03-09 on the multi-representation architecture.*
+*Generated 2026-03-09 on the multi-representation architecture.*
 
 ### Data
 
 - **Training:** 2005-2022, 3,495 upset candidates
 - **Testing:** 2023-2025, 558 upset candidates
-- **Test upset rate:** 28.5%
-- **Baseline Brier:** 0.2038
+- **CV:** 6-fold expanding-window (val seasons 2017-2022), 1,162 predictions
+- **Upset rate:** ~30% in both train and test
 
-### Model Performance
+### 8.1 CV Performance (6-fold, 1,162 games)
 
-| Model | AUC-ROC | Brier Score |
-|-------|---------|-------------|
-| LR | 0.562 | — |
-| XGB | 0.576 | 0.2014 (+1.2% vs baseline) |
-| LSTM | 0.527 | — |
+| Model | AUC-ROC | Brier Score | Log Loss |
+|-------|---------|-------------|----------|
+| LR | 0.6497 | 0.1974 | 0.5807 |
+| XGB | 0.6377 | 0.1991 | 0.5855 |
+| LSTM | 0.6407 | 0.1985 | 0.5832 |
 
-XGBoost is the best-performing model, which aligns with the general finding that gradient-boosted trees outperform deep learning on tabular data (Grinsztajn et al. 2022). All AUCs are modest — NFL upsets are genuinely hard to predict.
+**CV ranking:** LR > LSTM > XGB. All three models are competitive — LSTM is not the weak link.
 
-### Probability Correlations
+CV probability correlations:
 
 |      | LR    | XGB   | LSTM  |
 |------|-------|-------|-------|
-| LR   | 1.000 | 0.878 | 0.517 |
-| XGB  | 0.878 | 1.000 | 0.495 |
-| LSTM | 0.517 | 0.495 | 1.000 |
+| LR   | 1.000 | 0.874 | 0.784 |
+| XGB  | 0.874 | 1.000 | 0.699 |
+| LSTM | 0.784 | 0.699 | 1.000 |
 
-**Key finding:** LR and XGB are highly correlated (0.878), meaning they largely see the same signal. LSTM is substantially different from both (~0.5), confirming it captures genuinely different patterns. This is exactly what the multi-representation design intended.
+### 8.2 Test Set Performance (558 games, calibrated)
 
-### Disagreement Highlights
+| Model | AUC-ROC | Brier Score | Log Loss |
+|-------|---------|-------------|----------|
+| LR | 0.5622 | 0.2026 | 0.5942 |
+| XGB | 0.5755 | 0.2013 | 0.5915 |
+| LSTM | 0.5202 | 0.2072 | 0.6051 |
+| *Baseline Brier* | — | *0.2038* | — |
 
-- When all three models agree "upset": **64.7% actual upset rate** (2.3x base rate)
-- When all three agree "no upset": **6.0% actual rate**
-- LSTM produces 55 unique predictions (10% of games)
+**Test ranking:** XGB > LR > LSTM. XGBoost is the strongest on held-out data, consistent with Grinsztajn et al. (2022).
 
-### Per-Season Performance
+Test probability correlations:
 
-| Season | Games | Upset Rate | Best AUC (model) |
-|--------|-------|-----------|-----------------|
-| 2023 | 185 | 29.7% | 0.521 (XGB) |
-| 2024 | 192 | 23.4% | 0.554 (XGB) |
-| 2025 | 181 | 32.6% | 0.639 (XGB) |
+|      | LR    | XGB   | LSTM  |
+|------|-------|-------|-------|
+| LR   | 1.000 | 0.878 | 0.311 |
+| XGB  | 0.878 | 1.000 | 0.273 |
+| LSTM | 0.311 | 0.273 | 1.000 |
 
-### Top-K Analysis
+### 8.3 CV-to-Test Gap
 
-XGB's top 10 predictions include 6 actual upsets (60% hit rate, 2.1x lift vs 28.5% base). The ensemble's top 20 hit at 50% (1.8x lift). Signal exists but fades at higher K values.
+| Model | CV AUC | Test AUC | Gap |
+|-------|--------|----------|-----|
+| LR | 0.650 | 0.562 | -0.088 |
+| XGB | 0.638 | 0.576 | -0.062 |
+| LSTM | 0.641 | 0.520 | -0.121 |
+
+LSTM shows the largest generalization gap (0.12 AUC), suggesting temporal patterns learned in 2005-2022 don't fully transfer to 2023-2025. XGB generalizes best. The LSTM-LR/XGB correlation also drops dramatically from CV (0.78/0.70) to test (0.31/0.27), meaning LSTM diverges more in truly out-of-sample data.
+
+### 8.4 A/B Spread Ablation (CV)
+
+| Model | With Spread | Without Spread | Delta |
+|-------|-------------|----------------|-------|
+| LR | 0.6497 | 0.5707 | -0.079 |
+| XGB | 0.6377 | 0.5662 | -0.072 |
+| LSTM | 0.6407 | 0.5739 | -0.067 |
+
+**Without spread, LSTM wins:** ranking flips to LSTM > LR > XGB. LSTM degrades the least (-0.067 vs -0.079 for LR), supporting the thesis that it captures temporal signal independent of the market line.
+
+Correlation and disagreement effects of removing spread:
+- LR-XGB correlation drops from 0.874 → 0.742 (models diversify)
+- All-three agreement rate drops from 74.7% → 55.3%
+- LSTM exclusive predictions double from 5.6% → 11.0% of games
+
+### 8.5 Disagreement Analysis
+
+**CV disagreement (with spread, threshold = base rate 0.297):**
+
+| Category | N | % | Upset Rate | Interpretation |
+|----------|---|---|------------|----------------|
+| all_correct | 528 | 45.4% | 36.7% | Clear signal all architectures detect |
+| all_wrong | 340 | 29.3% | 20.9% | Outside model capabilities |
+| only_lr | 28 | 2.4% | 28.6% | Linear mispricing signal |
+| only_xgb | 48 | 4.1% | 25.0% | Interaction pattern |
+| only_lstm | 65 | 5.6% | 18.5% | Temporal signal (mostly non-upset rejection) |
+| lr_xgb | 78 | 6.7% | 29.5% | Static models agree |
+| lr_lstm | 48 | 4.1% | 33.3% | Linear + temporal agree |
+| xgb_lstm | 27 | 2.3% | 33.3% | Non-linear + temporal agree |
+
+**LSTM exclusive analysis:** Of 65 LSTM-only-correct predictions in CV, 53 are non-upsets correctly rejected (LSTM says "no" while LR/XGB say "yes") and 12 are upsets correctly caught. The LSTM's primary exclusive value is **moderating false alarms** from the static models, not detecting upsets the others miss.
+
+**Note on test set disagreement:** The test set uses calibrated (Platt-scaled) probabilities, which compress the probability range to [0.19, 0.50]. Threshold-based categorization on calibrated probabilities has reduced discriminative power compared to raw probabilities or rank-based analysis. The top-K analysis (Section 8.6) is more informative for test set disagreement.
+
+### 8.6 Top-K Analysis (Test Set)
+
+| K | LR | XGB | LSTM | Ensemble |
+|---|-----|-----|------|----------|
+| 10 | 5/10 (50%, 1.8x) | 6/10 (60%, 2.1x) | 3/10 (30%, 1.1x) | 6/10 (60%, 2.1x) |
+| 20 | 8/20 (40%, 1.4x) | 9/20 (45%, 1.6x) | 7/20 (35%, 1.2x) | 10/20 (50%, 1.8x) |
+| 50 | 19/50 (38%, 1.3x) | 22/50 (44%, 1.5x) | 16/50 (32%, 1.1x) | 18/50 (36%, 1.3x) |
+
+XGB's top 10 hit at 60% (2.1x lift). The ensemble's top 20 hit at 50% (1.8x lift). Signal exists but fades at higher K values.
+
+### 8.7 Per-Season Performance (Test Set)
+
+| Season | Games | Upset Rate | Best AUC (model) | LSTM AUC |
+|--------|-------|-----------|-----------------|----------|
+| 2023 | 185 | 29.7% | 0.521 (XGB) | 0.489 |
+| 2024 | 192 | 23.4% | 0.586 (LSTM) | 0.586 |
+| 2025 | 181 | 32.6% | 0.639 (XGB) | 0.493 |
+
+LSTM is the best model in 2024 but worst in 2023 and 2025, suggesting it is more season-dependent than the static models.
 
 ---
 
@@ -421,7 +484,7 @@ The disagreement framework reveals four structural types of upsets:
 - **Who catches it:** LSTM only
 - **What it is:** Temporal patterns invisible to point-in-time snapshots
 - **Mechanism:** Hot team effect, form shifts, schedule-driven fatigue
-- **Statistical status:** Significance tests pending rerun under current architecture
+- **Statistical status:** LSTM is competitive in CV (AUC 0.641) and wins without spread (0.574), but its exclusive catches are primarily non-upset rejections (53/65 in CV). Significance tests pending.
 
 ### Type 3: Hidden Information
 - **Who catches it:** Nobody
@@ -439,15 +502,17 @@ The disagreement framework reveals four structural types of upsets:
 
 ## 10. Open Questions & Next Steps
 
-### Immediate
-1. **Run CV with multi-representation architecture** — the test set results (Section 8) were produced from models trained on the full training set. We need fresh CV baselines with the new LR=46/XGB=70/LSTM=14x8+10 setup to compare test vs CV performance and complete the report.
-2. **Run A/B spread ablation** — re-run `run_ab_experiment.py` with the new architecture to see if the spread ablation findings hold (previous run used the old shared-feature design).
-3. **Investigate LSTM exclusive predictions** — LSTM-only catches have a 23.6% upset rate (below the 28.5% base rate). Why? Is this noise, or is the LSTM confidently wrong in a specific pattern?
+### Completed
+1. ~~**Run CV with multi-representation architecture**~~ — Done. Results in Section 8.1. LSTM is competitive (AUC 0.641).
+2. ~~**Run A/B spread ablation**~~ — Done. Results in Section 8.4. LSTM wins without spread (0.574).
+3. ~~**Investigate LSTM exclusive predictions**~~ — Done. LSTM exclusives are primarily non-upset rejections (Section 8.5).
 
 ### Research
 4. **XGB max_depth tuning** — currently 2, may need 3+ to exploit the 70-feature space effectively.
 5. **Significance testing** — rerun permutation, binomial, and Mann-Whitney tests on LSTM-only catches under the current architecture.
 6. **External data for Type 3** — could injury reports or motivation signals reduce the "hidden information" category?
+7. **Investigate LSTM CV-to-test gap** — LSTM drops 0.12 AUC from CV to test (largest of all models). Is this temporal non-stationarity, or overfitting to 2005-2022 temporal patterns?
+8. **Calibration and disagreement** — current test set disagreement uses calibrated probabilities with compressed range. Consider raw-probability or rank-based disagreement analysis for the paper.
 
 ---
 

@@ -1,0 +1,842 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>APR Research Dashboard</title>
+<style>
+:root {
+  --bg: #f8f7f4;
+  --surface: #ffffff;
+  --border: #e2e0db;
+  --text: #2d2d2d;
+  --text-muted: #6b6b6b;
+  --text-light: #9a9a9a;
+  --accent: #4a6fa5;
+  --lr-color: #4a6fa5;
+  --lr-bg: #edf2f9;
+  --xgb-color: #d4793a;
+  --xgb-bg: #fdf2e9;
+  --lstm-color: #6a8d5b;
+  --lstm-bg: #eef4eb;
+  --upset-color: #c0392b;
+  --correct-color: #27ae60;
+  --wrong-color: #ccc;
+  --radius: 8px;
+  --shadow: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  font-size: 15px; color: var(--text); background: var(--bg);
+  line-height: 1.6; -webkit-font-smoothing: antialiased;
+}
+
+.container { max-width: 980px; margin: 0 auto; padding: 0 24px; }
+
+/* ── Header ──────────────────────────────────────── */
+header {
+  background: var(--surface); border-bottom: 1px solid var(--border);
+  padding: 32px 0 24px;
+}
+header h1 { font-size: 24px; font-weight: 700; letter-spacing: -0.5px; }
+header .subtitle {
+  font-size: 16px; color: var(--text-muted); margin-top: 2px; font-weight: 400;
+}
+header .research-q {
+  margin-top: 14px; font-size: 14px; color: var(--text);
+  background: var(--bg); border-radius: var(--radius); padding: 14px 18px;
+  border-left: 3px solid var(--accent); line-height: 1.55;
+}
+header .research-q strong { font-weight: 600; }
+
+/* ── Model legend ────────────────────────────────── */
+.model-cards {
+  display: flex; gap: 12px; flex-wrap: wrap; margin-top: 18px;
+}
+.model-card {
+  flex: 1; min-width: 200px;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 14px 16px; background: var(--surface);
+}
+.model-card .model-header {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 6px;
+}
+.model-card .model-dot {
+  width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
+}
+.model-card .model-name { font-weight: 700; font-size: 14px; }
+.model-card .model-full { font-size: 12px; color: var(--text-muted); }
+.model-card .model-desc { font-size: 13px; color: var(--text-muted); line-height: 1.45; }
+
+/* ── How-to-read box ─────────────────────────────── */
+.how-to-read {
+  background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 16px 20px; margin-top: 16px;
+}
+.how-to-read h4 {
+  font-size: 12px; text-transform: uppercase; letter-spacing: 0.6px;
+  color: var(--text-light); margin-bottom: 8px; font-weight: 600;
+}
+.how-to-read dl { font-size: 13px; line-height: 1.7; }
+.how-to-read dt {
+  font-weight: 700; display: inline; color: var(--text);
+}
+.how-to-read dd {
+  display: inline; margin: 0 16px 0 0; color: var(--text-muted);
+}
+
+/* ── Nav ─────────────────────────────────────────── */
+nav {
+  background: var(--surface); border-bottom: 1px solid var(--border);
+  padding: 0; position: sticky; top: 0; z-index: 10;
+}
+nav .container { display: flex; gap: 0; }
+nav a {
+  display: block; padding: 12px 20px; font-size: 14px; font-weight: 500;
+  text-decoration: none; color: var(--text-muted); border-bottom: 2px solid transparent;
+  cursor: pointer; transition: color 0.15s, border-color 0.15s;
+}
+nav a:hover { color: var(--text); }
+nav a.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+
+/* ── Main content ────────────────────────────────── */
+main { padding: 28px 0 60px; }
+.tab-content { display: none; }
+.tab-content.active { display: block; }
+
+/* ── Section cards ───────────────────────────────── */
+.card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 24px 28px; margin-bottom: 20px;
+  box-shadow: var(--shadow);
+}
+.card h2 {
+  font-size: 18px; font-weight: 700; margin-bottom: 4px; letter-spacing: -0.3px;
+}
+.card h3 {
+  font-size: 15px; font-weight: 600; margin: 20px 0 8px; color: var(--text);
+}
+.card .description {
+  font-size: 14px; color: var(--text-muted); margin-bottom: 16px; line-height: 1.6;
+}
+.card .callout {
+  font-size: 13px; color: var(--text-muted); background: var(--bg);
+  border-radius: var(--radius); padding: 10px 14px; margin: 12px 0;
+  border-left: 3px solid var(--border); line-height: 1.5;
+}
+.card .callout strong { color: var(--text); }
+
+/* ── Metric boxes ────────────────────────────────── */
+.metric-grid { display: flex; gap: 14px; flex-wrap: wrap; margin: 16px 0; }
+.metric-box {
+  background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 14px 20px; min-width: 140px; flex: 1;
+}
+.metric-box .label {
+  font-size: 11px; color: var(--text-light); text-transform: uppercase;
+  letter-spacing: 0.8px; font-weight: 600;
+}
+.metric-box .sublabel { font-size: 11px; color: var(--text-light); margin-top: 2px; }
+.metric-box .value { font-size: 26px; font-weight: 700; margin-top: 2px; color: var(--text); }
+.metric-box .value.small { font-size: 20px; }
+
+/* ── Tables ──────────────────────────────────────── */
+table {
+  border-collapse: collapse; width: 100%; margin: 12px 0;
+  font-size: 13px;
+}
+th, td { padding: 10px 14px; text-align: right; border-bottom: 1px solid var(--border); }
+th {
+  background: var(--bg); font-weight: 600; color: var(--text-muted);
+  font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;
+}
+th:first-child, td:first-child { text-align: left; }
+tr:hover td { background: #fafaf8; }
+
+/* Model-colored cells */
+td.lr { color: var(--lr-color); font-weight: 600; }
+td.xgb { color: var(--xgb-color); font-weight: 600; }
+td.lstm { color: var(--lstm-color); font-weight: 600; }
+
+/* Bars */
+.bar { height: 8px; border-radius: 4px; display: inline-block; }
+.bar-lr { background: var(--lr-color); }
+.bar-xgb { background: var(--xgb-color); }
+.bar-lstm { background: var(--lstm-color); }
+.bar-pos { background: var(--accent); }
+.bar-neg { background: var(--text-light); }
+
+/* ── Predictions tab ─────────────────────────────── */
+.filter-bar {
+  display: flex; align-items: center; gap: 12px; margin-bottom: 12px;
+}
+.filter-bar input {
+  font-family: inherit; font-size: 14px;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 8px 14px; width: 320px; background: var(--surface);
+  transition: border-color 0.15s;
+}
+.filter-bar input:focus { outline: none; border-color: var(--accent); }
+.filter-bar .count { font-size: 13px; color: var(--text-muted); }
+
+.sort-arrow { cursor: pointer; user-select: none; }
+.sort-arrow:hover { color: var(--text); }
+
+.result-upset {
+  display: inline-block; background: #fdecea; color: var(--upset-color);
+  font-weight: 700; font-size: 11px; padding: 2px 8px; border-radius: 4px;
+  text-transform: uppercase; letter-spacing: 0.3px;
+}
+.result-hold { color: var(--text-light); }
+
+.check-correct { color: var(--correct-color); font-weight: 700; font-size: 15px; }
+.check-wrong { color: var(--wrong-color); font-size: 15px; }
+
+/* ── Category badges ─────────────────────────────── */
+.cat-explain {
+  font-size: 12px; color: var(--text-muted); line-height: 1.45;
+  max-width: 300px; white-space: normal;
+}
+.cat-badge {
+  display: inline-block; font-size: 12px; font-weight: 600;
+  padding: 3px 10px; border-radius: 4px; white-space: nowrap;
+}
+.cat-badge.all_correct { background: #e8f5e9; color: #2e7d32; }
+.cat-badge.all_wrong { background: #fce4ec; color: #c62828; }
+.cat-badge.only_lr { background: var(--lr-bg); color: var(--lr-color); }
+.cat-badge.only_xgb { background: var(--xgb-bg); color: var(--xgb-color); }
+.cat-badge.only_lstm { background: var(--lstm-bg); color: var(--lstm-color); }
+.cat-badge.lr_xgb { background: #fef3e2; color: #b8730a; }
+.cat-badge.lr_lstm { background: #e8eef5; color: #3a6090; }
+.cat-badge.xgb_lstm { background: #edf5ea; color: #4a7a3c; }
+
+/* ── Delta indicators ────────────────────────────── */
+.delta-neg { color: var(--upset-color); }
+.delta-pos { color: var(--correct-color); }
+
+/* ── Loading / error ─────────────────────────────── */
+#loading {
+  text-align: center; padding: 80px 0; color: var(--text-muted);
+  font-size: 16px;
+}
+#loading .spinner {
+  display: inline-block; width: 24px; height: 24px;
+  border: 3px solid var(--border); border-top-color: var(--accent);
+  border-radius: 50%; animation: spin 0.8s linear infinite;
+  margin-bottom: 12px;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+#error { padding: 60px 0; color: #c0392b; display: none; text-align: center; }
+
+/* ── Responsive ──────────────────────────────────── */
+@media (max-width: 640px) {
+  .container { padding: 0 16px; }
+  .card { padding: 18px; }
+  nav a { padding: 10px 14px; font-size: 13px; }
+  .model-cards { flex-direction: column; }
+  .filter-bar input { width: 100%; }
+  .metric-box { min-width: 100px; }
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="container">
+    <h1>NFL Upset Prediction</h1>
+    <p class="subtitle">Can three different AI approaches reveal what makes NFL upsets predictable?</p>
+    <div class="research-q">
+      <strong>Research Question:</strong> How do the agreement and disagreement patterns
+      of three structurally distinct ML architectures reveal the mechanisms and
+      predictability boundaries of NFL upsets?
+    </div>
+
+    <div class="model-cards">
+      <div class="model-card" style="border-left: 3px solid var(--lr-color)">
+        <div class="model-header">
+          <span class="model-dot" style="background:var(--lr-color)"></span>
+          <span class="model-name">LR</span>
+          <span class="model-full">Logistic Regression</span>
+        </div>
+        <p class="model-desc">The simplest model. Looks at a <strong>snapshot summary</strong> of each team (win rate, scoring averages, Elo rating, etc.) and makes a single yes/no decision. Like reading a stat sheet before the game.</p>
+      </div>
+      <div class="model-card" style="border-left: 3px solid var(--xgb-color)">
+        <div class="model-header">
+          <span class="model-dot" style="background:var(--xgb-color)"></span>
+          <span class="model-name">XGB</span>
+          <span class="model-full">XGBoost</span>
+        </div>
+        <p class="model-desc">A more complex model. Gets the same stats as LR <em>plus</em> each team's last 3 games in detail. It finds <strong>combinations of factors</strong> that matter together&mdash;like "a team that's 2&ndash;8 AND playing on a short week."</p>
+      </div>
+      <div class="model-card" style="border-left: 3px solid var(--lstm-color)">
+        <div class="model-header">
+          <span class="model-dot" style="background:var(--lstm-color)"></span>
+          <span class="model-name">LSTM</span>
+          <span class="model-full">Long Short-Term Memory Neural Network</span>
+        </div>
+        <p class="model-desc">A neural network that <strong>watches the sequence</strong> of each team's last 8 games. Designed to pick up on streaks, momentum shifts, and trajectory. Like watching game film instead of reading box scores.</p>
+      </div>
+    </div>
+
+    <div class="how-to-read">
+      <h4>Key terms used in this dashboard</h4>
+      <dl>
+        <dt>Upset</dt><dd>= When the expected loser (underdog by 3+ points on the betting line) wins the game.</dd>
+        <dt>AUC</dt><dd>= How well a model ranks games by upset risk. 0.5 = coin flip, 1.0 = perfect. Higher is better.</dd>
+        <dt>Brier Score</dt><dd>= How accurate the predicted probabilities are. Lower is better (0 = perfect).</dd>
+        <dt>Threshold</dt><dd>= A model "predicts upset" when its probability exceeds the overall upset rate (~30%), not 50%.</dd>
+      </dl>
+    </div>
+  </div>
+</header>
+
+<nav id="nav" style="display:none"><div class="container" id="nav-inner"></div></nav>
+
+<main>
+<div class="container">
+
+<div id="loading">
+  <div class="spinner"></div><br>
+  Loading results from server&hellip;
+</div>
+<div id="error"></div>
+
+<div id="tab-overview" class="tab-content"></div>
+<div id="tab-predictions" class="tab-content"></div>
+<div id="tab-disagreement" class="tab-content"></div>
+<div id="tab-features" class="tab-content"></div>
+<div id="tab-cv" class="tab-content"></div>
+
+</div>
+</main>
+
+<script>
+var DATA = null;
+
+async function init() {
+  try {
+    var resp = await fetch("/api/data");
+    if (!resp.ok) throw new Error("HTTP " + resp.status);
+    DATA = await resp.json();
+  } catch (e) {
+    document.getElementById("loading").style.display = "none";
+    var errEl = document.getElementById("error");
+    errEl.style.display = "block";
+    errEl.textContent = "Failed to load data: " + e.message;
+    return;
+  }
+
+  document.getElementById("loading").style.display = "none";
+  document.getElementById("nav").style.display = "";
+
+  initNav();
+  renderOverview();
+  renderPredictions();
+  renderDisagreement();
+  renderFeatures();
+  renderCV();
+}
+
+// ── Tab navigation ──────────────────────────────────
+var TABS = [
+  ["overview", "Overview"],
+  ["predictions", "Game Results"],
+  ["disagreement", "Where Models Disagree"],
+  ["features", "What Matters Most"],
+  ["cv", "Experiments"],
+];
+
+function initNav() {
+  var nav = document.getElementById("nav-inner");
+  TABS.forEach(function(pair) {
+    var a = document.createElement("a");
+    a.textContent = pair[1];
+    a.dataset.tab = pair[0];
+    a.onclick = function() { switchTab(pair[0]); };
+    nav.appendChild(a);
+  });
+  switchTab("overview");
+}
+
+function switchTab(id) {
+  document.querySelectorAll(".tab-content").forEach(function(el) { el.classList.remove("active"); });
+  document.getElementById("tab-" + id).classList.add("active");
+  document.querySelectorAll("nav a").forEach(function(a) {
+    a.classList.toggle("active", a.dataset.tab === id);
+  });
+}
+
+function fmtAuc(v) { return isNaN(v) ? "\u2014" : v.toFixed(3); }
+
+function metricBox(label, value, sublabel) {
+  var sub = sublabel ? '<div class="sublabel">' + sublabel + '</div>' : '';
+  return '<div class="metric-box"><div class="label">' + label +
+    '</div><div class="value">' + value + '</div>' + sub + '</div>';
+}
+
+function modelClass(name) {
+  return name.toLowerCase().replace(/\s/g, "");
+}
+
+// ── Overview ──────────────────────────────────────
+function renderOverview() {
+  var el = document.getElementById("tab-overview");
+  var html = "";
+
+  // Methodology intro card
+  html += '<div class="card">';
+  html += '<h2>How This Works</h2>';
+  html += '<p class="description">We trained three AI models on <strong>18 seasons of NFL data</strong> (2005&ndash;2022). ' +
+    'Each model sees the same games but processes the information differently&mdash;one reads stat summaries, ' +
+    'one finds complex patterns, and one watches recent game sequences.</p>';
+  html += '<p class="description" style="margin-bottom:0">The key insight comes from <strong>where they disagree</strong>. ' +
+    'When only one model correctly predicts an upset, it tells us what kind of pattern drove that upset&mdash;' +
+    'was it a simple stat mismatch, a complex combination of factors, or a momentum shift?</p>';
+  html += '</div>';
+
+  var sets = [
+    ["test", "Real Test: Unseen Games", "2023\u20132025",
+     "After training, we locked the models and tested them on games they had <strong>never seen before</strong>. " +
+     "This is the true measure of whether they learned real patterns or just memorized old games.",
+     "This is like giving a student a final exam with brand-new questions."],
+    ["cv_with_spread", "Practice Test: Cross-Validation", "2017\u20132022",
+     "During training, we repeatedly held out one season at a time to check progress. " +
+     "The models score higher here because these games are closer to what they trained on. " +
+     "If scores here are much higher than on the real test, it's a sign of <strong>overfitting</strong>&mdash;" +
+     "the model memorized patterns that didn't hold up in new seasons.",
+     "Like a practice exam where some questions overlap with the study guide."]
+  ];
+
+  for (var si = 0; si < sets.length; si++) {
+    var key = sets[si][0], title = sets[si][1], sub = sets[si][2], desc = sets[si][3], note = sets[si][4];
+    var s = DATA.summaries[key];
+    if (!s) continue;
+
+    html += '<div class="card">';
+    html += '<h2>' + title + '</h2>';
+    html += '<p style="font-size:13px;color:var(--text-light);margin-bottom:4px">' + sub + ' &middot; ' + s.n_games + ' games</p>';
+    html += '<p class="description">' + desc + '</p>';
+
+    html += '<div class="metric-grid">';
+    html += metricBox("Total Games", s.n_games);
+    html += metricBox("Upset Rate", (s.upset_rate * 100).toFixed(1) + "%", "How often underdogs won");
+    html += '</div>';
+
+    html += '<table>';
+    html += '<tr><th>Model</th><th>AUC<br><span style="font-weight:400;text-transform:none;letter-spacing:0">(ranking ability)</span></th>';
+    html += '<th>Brier Score<br><span style="font-weight:400;text-transform:none;letter-spacing:0">(accuracy)</span></th>';
+    html += '<th style="text-align:left">Relative Performance</th></tr>';
+    var models = Object.entries(s.models);
+    var maxAuc = Math.max.apply(null, models.map(function(m) { return m[1].auc; }));
+    for (var mi = 0; mi < models.length; mi++) {
+      var m = models[mi][0], v = models[mi][1];
+      var auc = isNaN(v.auc) ? "\u2014" : v.auc.toFixed(4);
+      var best = v.auc === maxAuc;
+      var bestAttr = best ? " style=\"font-weight:700\"" : "";
+      var barW = isNaN(v.auc) ? 0 : Math.round(160 * (v.auc - 0.45) / 0.25);
+      var barCls = "bar bar-" + modelClass(m);
+      html += '<tr><td class="' + modelClass(m) + '"' + bestAttr + '>' + m + (best ? ' \u2605' : '') + '</td>';
+      html += '<td' + bestAttr + '>' + auc + '</td>';
+      html += '<td>' + v.brier.toFixed(4) + '</td>';
+      html += '<td style="text-align:left"><span class="' + barCls + '" style="width:' + Math.max(barW, 2) + 'px"></span></td></tr>';
+    }
+    html += '</table>';
+    html += '<div class="callout">' + note + '</div>';
+
+    // Season breakdown
+    var ss = DATA.seasons[key];
+    if (ss && ss.length > 0) {
+      html += '<h3>Broken Down by Season</h3>';
+      html += '<p class="description" style="margin-bottom:10px">No single model wins every season. ' +
+              'This inconsistency is itself a finding&mdash;it suggests that different types of upsets dominate in different years.</p>';
+      html += '<table><tr><th>Season</th><th>Games</th><th>Upset Rate</th>';
+      html += '<th style="color:var(--lr-color)">LR</th>';
+      html += '<th style="color:var(--xgb-color)">XGB</th>';
+      html += '<th style="color:var(--lstm-color)">LSTM</th></tr>';
+      for (var ri = 0; ri < ss.length; ri++) {
+        var row = ss[ri];
+        var aucs = [row.lr_auc, row.xgb_auc, row.lstm_auc];
+        var bestIdx = aucs.indexOf(Math.max.apply(null, aucs.filter(function(a) { return !isNaN(a); })));
+        html += '<tr><td>' + row.season + '</td><td>' + row.n + '</td><td>' + (row.upset_rate*100).toFixed(1) + '%</td>';
+        html += '<td class="lr">' + fmtAuc(row.lr_auc) + (bestIdx===0?' \u2605':'') + '</td>';
+        html += '<td class="xgb">' + fmtAuc(row.xgb_auc) + (bestIdx===1?' \u2605':'') + '</td>';
+        html += '<td class="lstm">' + fmtAuc(row.lstm_auc) + (bestIdx===2?' \u2605':'') + '</td></tr>';
+      }
+      html += '</table>';
+    }
+    html += '</div>';
+  }
+
+  el.innerHTML = html;
+}
+
+// ── Predictions ─────────────────────────────────────
+var predSortCol = null;
+var predSortAsc = true;
+
+var COL_LABELS = {
+  "season": "Year", "week": "Wk",
+  "underdog": "Underdog", "favorite": "Favorite", "spread_magnitude": "Spread",
+  "y_true": "Result", "lr_prob": "LR Prob", "xgb_prob": "XGB Prob", "lstm_prob": "LSTM Prob",
+  "category": "Who Got It Right", "lr_correct": "LR", "xgb_correct": "XGB", "lstm_correct": "LSTM"
+};
+
+function renderPredictions() {
+  var records = DATA.predictions.test || [];
+  var cols = ["season","week","underdog","favorite","spread_magnitude",
+              "y_true","lr_prob","xgb_prob","lstm_prob","category",
+              "lr_correct","xgb_correct","lstm_correct"];
+
+  var el = document.getElementById("tab-predictions");
+  var html = '<div class="card">';
+  html += '<h2>Game-by-Game Results</h2>';
+  html += '<p class="description">Every game from the test set. Each model outputs a number between 0 and 1 representing ' +
+          'how likely it thinks an upset is. The <strong>Result</strong> column shows what actually happened. ' +
+          'The checkmarks on the right show which models got it right.</p>';
+  html += '<div class="callout"><strong>How to read the probabilities:</strong> A value like 0.350 means the model ' +
+          'thinks there\'s a 35% chance of an upset. Since upsets happen about 30% of the time, anything above ~0.30 ' +
+          'counts as the model predicting an upset.</div>';
+  html += '<div class="filter-bar">';
+  html += '<input type="text" id="pred-filter" placeholder="Type to filter (e.g., a team name or season)&hellip;">';
+  html += '<span class="count" id="pred-count"></span>';
+  html += '</div>';
+  html += '<div style="overflow-x:auto"><table id="pred-table"></table></div>';
+  html += '</div>';
+  el.innerHTML = html;
+
+  var table = document.getElementById("pred-table");
+  var filterEl = document.getElementById("pred-filter");
+
+  function draw(filter) {
+    var rows = records;
+    if (filter) {
+      var f = filter.toLowerCase();
+      rows = rows.filter(function(r) {
+        return cols.some(function(c) { return String(r[c]).toLowerCase().indexOf(f) >= 0; });
+      });
+    }
+    if (predSortCol !== null) {
+      rows = rows.slice().sort(function(a, b) {
+        var va = a[predSortCol], vb = b[predSortCol];
+        if (typeof va === "number" && typeof vb === "number") return predSortAsc ? va - vb : vb - va;
+        return predSortAsc ? String(va).localeCompare(String(vb)) : String(vb).localeCompare(String(va));
+      });
+    }
+
+    document.getElementById("pred-count").textContent = rows.length + " of " + records.length + " games";
+
+    var probCols = {"lr_prob":1, "xgb_prob":1, "lstm_prob":1};
+    var corrCols = {"lr_correct":1, "xgb_correct":1, "lstm_correct":1};
+    var probModelCls = {"lr_prob":"lr","xgb_prob":"xgb","lstm_prob":"lstm"};
+
+    var h = "<tr>";
+    for (var ci = 0; ci < cols.length; ci++) {
+      var c = cols[ci];
+      var arrow = predSortCol === c ? (predSortAsc ? " \u25B2" : " \u25BC") : "";
+      var colColor = "";
+      if (c === "lr_prob" || c === "lr_correct") colColor = ' style="color:var(--lr-color)"';
+      if (c === "xgb_prob" || c === "xgb_correct") colColor = ' style="color:var(--xgb-color)"';
+      if (c === "lstm_prob" || c === "lstm_correct") colColor = ' style="color:var(--lstm-color)"';
+      h += '<th class="sort-arrow" data-col="' + c + '"' + colColor + '>' + (COL_LABELS[c] || c) + arrow + '</th>';
+    }
+    h += "</tr>";
+
+    for (var ri = 0; ri < rows.length; ri++) {
+      var r = rows[ri];
+      h += "<tr>";
+      for (var ci2 = 0; ci2 < cols.length; ci2++) {
+        var col = cols[ci2];
+        var v = r[col];
+        var cls = "";
+        var content = v;
+        if (probCols[col]) {
+          content = Number(v).toFixed(3);
+          cls = probModelCls[col] || "";
+        } else if (corrCols[col]) {
+          content = v === 1 ? "\u2713" : "\u2717";
+          cls = v === 1 ? "check-correct" : "check-wrong";
+        } else if (col === "y_true") {
+          content = v === 1 ? '<span class="result-upset">Upset</span>' : '<span class="result-hold">\u2014</span>';
+        } else if (col === "category") {
+          content = '<span class="cat-badge ' + v + '">' + formatCatName(v) + '</span>';
+        }
+        h += '<td class="' + cls + '">' + content + '</td>';
+      }
+      h += "</tr>";
+    }
+    table.innerHTML = h;
+
+    table.querySelectorAll("th.sort-arrow").forEach(function(th) {
+      th.onclick = function() {
+        var col = th.dataset.col;
+        if (predSortCol === col) predSortAsc = !predSortAsc;
+        else { predSortCol = col; predSortAsc = true; }
+        draw(filterEl.value);
+      };
+    });
+  }
+
+  filterEl.oninput = function() { draw(filterEl.value); };
+  draw("");
+}
+
+// ── Shared helpers ──────────────────────────────────
+
+var CAT_FRIENDLY_NAMES = {
+  "all_correct": "All 3 Right",
+  "all_wrong": "All 3 Wrong",
+  "only_lr": "Only LR",
+  "only_xgb": "Only XGB",
+  "only_lstm": "Only LSTM",
+  "lr_xgb": "LR + XGB",
+  "lr_lstm": "LR + LSTM",
+  "xgb_lstm": "XGB + LSTM"
+};
+
+function formatCatName(cat) {
+  return CAT_FRIENDLY_NAMES[cat] || cat.replace(/_/g, " ");
+}
+
+// ── Disagreement ────────────────────────────────────
+var CAT_EXPLAIN = {
+  "all_correct": "The game was predictable by all approaches. All three models saw enough signal in the stats to get it right.",
+  "all_wrong": "None of the models saw this coming. The outcome was likely driven by something not in the data&mdash;an injury, weather, a fluke play, or team motivation.",
+  "only_lr": "Only the simplest model got it right. The upset was visible in basic team averages, but the more complex models overthought it.",
+  "only_xgb": "Only XGBoost got it right. The upset was driven by a specific combination of factors that only the pattern-finding model detected.",
+  "only_lstm": "Only the neural network got it right. The upset was driven by a recent trend or momentum shift that only showed up in the game-by-game sequence.",
+  "lr_xgb": "Both stat-based models agreed and were right; the sequence-based LSTM disagreed. The game's outcome was in the season-long stats, not recent momentum.",
+  "lr_lstm": "LR and the LSTM agreed and were right; XGBoost disagreed. XGBoost was distracted by a misleading combination of factors.",
+  "xgb_lstm": "XGBoost and the LSTM agreed and were right; the simple model disagreed. The pattern was too complex for a simple linear read of the stats."
+};
+
+function renderDisagreement() {
+  var el = document.getElementById("tab-disagreement");
+  var html = "";
+
+  html += '<div class="card">';
+  html += '<h2>Where the Models Disagree</h2>';
+  html += '<p class="description"><strong>This is the core of the research.</strong> After each game, we check which models predicted the outcome correctly ' +
+    'and categorize the result. When only one model gets it right, that tells us something about <em>what kind of pattern</em> drove the upset.</p>';
+
+  html += '<div class="callout"><strong>Why this matters:</strong> If the simple model (LR) catches upsets that the complex models miss, ' +
+    'those upsets were probably straightforward stat mismatches. If only the LSTM catches them, they were likely driven by recent momentum. ' +
+    'And when all three fail, the game was probably decided by something outside the data entirely.</div>';
+
+  var sets = [
+    ["test", "Test Set (2023\u20132025)", "These are the unseen games&mdash;the real evaluation."],
+    ["cv_with_spread", "Cross-Validation (2017\u20132022)", "Results from the training period, broken into rotating held-out seasons."]
+  ];
+  for (var si = 0; si < sets.length; si++) {
+    var key = sets[si][0], label = sets[si][1], desc = sets[si][2];
+    var cats = DATA.categories[key];
+    if (!cats || cats.length === 0) continue;
+    var maxN = Math.max.apply(null, cats.map(function(c) { return c.n; }));
+
+    html += '<h3>' + label + '</h3>';
+    html += '<p class="description" style="margin-bottom:10px">' + desc + '</p>';
+    html += '<table><tr><th>Who Got It Right</th><th>Games</th><th>Share</th><th>Actual Upset %</th><th style="text-align:left">What This Tells Us</th><th></th></tr>';
+    for (var ci = 0; ci < cats.length; ci++) {
+      var c = cats[ci];
+      var w = Math.round(140 * c.n / maxN);
+      var explain = CAT_EXPLAIN[c.category] || "";
+      html += '<tr><td><span class="cat-badge ' + c.category + '">' + formatCatName(c.category) + '</span></td>';
+      html += '<td>' + c.n + '</td>';
+      html += '<td>' + c.pct + '%</td>';
+      html += '<td>' + (c.upset_rate * 100).toFixed(1) + '%</td>';
+      html += '<td class="cat-explain">' + explain + '</td>';
+      html += '<td><span class="bar bar-pos" style="width:' + w + 'px;opacity:0.5"></span></td></tr>';
+    }
+    html += '</table>';
+  }
+  html += '</div>';
+
+  el.innerHTML = html;
+}
+
+// ── Features ────────────────────────────────────────
+function renderFeatures() {
+  var el = document.getElementById("tab-features");
+  var html = "";
+
+  html += '<div class="card">';
+  html += '<h2>What Matters Most for Predicting Upsets</h2>';
+  html += '<p class="description">The Logistic Regression model is the most interpretable&mdash;we can see exactly how much each input ' +
+    'pushes its prediction. A <strong style="color:var(--accent)">blue bar</strong> means the factor <em>increases</em> upset likelihood. ' +
+    'A <strong style="color:var(--text-light)">grey bar</strong> means it <em>decreases</em> upset likelihood. Longer bars = stronger influence.</p>';
+
+  var sets = [
+    ["with_spread", "Using All Information (Including Betting Lines)", "46 input features",
+     "When the model has access to the betting spread (the point handicap set by oddsmakers), " +
+     "it dominates everything else. This makes sense&mdash;the spread already encodes the market's best guess about the game."],
+    ["without_spread", "Using Only Team Performance Stats", "42 input features",
+     "What drives predictions when we take away the betting line? Elo ratings, home-field advantage, and " +
+     "scoring differentials rise to the top. These are the raw performance signals the model relies on."]
+  ];
+
+  for (var si = 0; si < sets.length; si++) {
+    var key = sets[si][0], label = sets[si][1], sub = sets[si][2], desc = sets[si][3];
+    var coefs = DATA.coefs[key];
+    if (!coefs) continue;
+
+    var sorted = Object.entries(coefs).sort(function(a, b) { return Math.abs(b[1]) - Math.abs(a[1]); });
+    var maxAbs = Math.max.apply(null, sorted.map(function(x) { return Math.abs(x[1]); }));
+
+    html += '<h3>' + label + '</h3>';
+    html += '<p style="font-size:13px;color:var(--text-light);margin-bottom:4px">' + sub + '</p>';
+    html += '<p class="description">' + desc + '</p>';
+    html += '<table><tr><th>Feature</th><th>Weight</th><th style="text-align:left">Influence</th></tr>';
+    for (var fi = 0; fi < sorted.length; fi++) {
+      var feat = sorted[fi][0], val = sorted[fi][1];
+      var w = Math.round(180 * Math.abs(val) / maxAbs);
+      var barCls = val >= 0 ? "bar bar-pos" : "bar bar-neg";
+      html += '<tr><td style="font-family:monospace;font-size:12px">' + feat + '</td>';
+      html += '<td>' + val.toFixed(4) + '</td>';
+      html += '<td style="text-align:left"><span class="' + barCls + '" style="width:' + Math.max(w, 2) + 'px"></span></td></tr>';
+    }
+    html += '</table>';
+  }
+  html += '</div>';
+
+  el.innerHTML = html;
+}
+
+// ── CV / Ablation ───────────────────────────────────
+function renderCV() {
+  var el = document.getElementById("tab-cv");
+  var html = "";
+
+  var sA = DATA.summaries.cv_with_spread;
+  var sB = DATA.summaries.cv_without_spread;
+  var modelNames = ["LR", "XGB", "LSTM"];
+  var modelCls = {"LR":"lr", "XGB":"xgb", "LSTM":"lstm"};
+
+  // Spread ablation
+  if (sA && sB) {
+    html += '<div class="card">';
+    html += '<h2>Experiment: What Happens Without the Betting Line?</h2>';
+    html += '<p class="description">The betting spread is the strongest single predictor of upsets&mdash;it reflects the collective wisdom ' +
+      'of the sports betting market. But what if we take it away? This experiment forces each model to rely on ' +
+      '<strong>team performance stats alone</strong>. A model that barely drops is finding signal that the betting market doesn\'t fully capture.</p>';
+
+    html += '<h3>Model Accuracy With vs. Without the Spread</h3>';
+    html += '<table><tr><th>Model</th><th>With Spread</th><th>Without</th><th>Drop</th><th style="text-align:left"></th></tr>';
+    var deltas = modelNames.map(function(m) { return sB.models[m].auc - sA.models[m].auc; });
+    var minDelta = Math.min.apply(null, deltas.map(function(d) { return Math.abs(d); }));
+
+    for (var i = 0; i < modelNames.length; i++) {
+      var m = modelNames[i];
+      var a = sA.models[m].auc, b = sB.models[m].auc;
+      var d = b - a;
+      var cls = d < 0 ? "delta-neg" : "delta-pos";
+      var barW = Math.round(100 * Math.abs(d) / Math.max.apply(null, deltas.map(Math.abs)));
+      var leastStr = Math.abs(d) === minDelta ? "Least affected \u2605" : "";
+      html += '<tr><td class="' + modelCls[m] + '">' + m + '</td>';
+      html += '<td>' + fmtAuc(a) + '</td>';
+      html += '<td>' + fmtAuc(b) + '</td>';
+      html += '<td class="' + cls + '">' + (d > 0 ? "+" : "") + d.toFixed(4) + '</td>';
+      html += '<td style="text-align:left"><span class="bar bar-neg" style="width:' + barW + 'px;opacity:0.4"></span>' +
+              '<span style="font-size:12px;color:var(--text-muted);margin-left:6px">' + leastStr + '</span></td></tr>';
+    }
+    html += '</table>';
+    html += '<div class="callout"><strong>Key finding:</strong> The LSTM drops the least when the spread is removed. ' +
+      'This suggests the neural network captures temporal patterns (like momentum and streaks) that are ' +
+      'partially independent of the betting market\'s assessment.</div>';
+    html += '</div>';
+  }
+
+  // Generalization gap
+  if (sA && DATA.summaries.test) {
+    var test = DATA.summaries.test;
+    html += '<div class="card">';
+    html += '<h2>Practice vs. Real Performance</h2>';
+    html += '<p class="description">How much do scores drop when going from practice (cross-validation on training data) ' +
+      'to the real test (unseen 2023\u20132025 games)? A bigger drop means the model <strong>overfit</strong>&mdash;' +
+      'it learned patterns from the past that didn\'t carry forward. A smaller drop means the model found more durable, generalizable patterns.</p>';
+
+    html += '<table><tr><th>Model</th><th>Practice (CV)</th><th>Real Test</th><th>Drop</th><th style="text-align:left"></th></tr>';
+    var gaps = [];
+    for (var i2 = 0; i2 < modelNames.length; i2++) {
+      var m2 = modelNames[i2];
+      var cv = sA.models[m2].auc, ts = test.models[m2].auc;
+      var gap = ts - cv;
+      gaps.push(gap);
+      var barW2 = Math.round(120 * Math.abs(gap) / 0.15);
+      var smallestGap = false; // will compute after
+      html += '<tr><td class="' + modelCls[m2] + '">' + m2 + '</td>';
+      html += '<td>' + fmtAuc(cv) + '</td>';
+      html += '<td>' + fmtAuc(ts) + '</td>';
+      html += '<td class="delta-neg">' + gap.toFixed(4) + '</td>';
+      html += '<td style="text-align:left"><span class="bar bar-neg" style="width:' + barW2 + 'px;opacity:0.35"></span></td></tr>';
+    }
+    html += '</table>';
+    html += '<div class="callout"><strong>What this means:</strong> All models perform worse on truly unseen games, which is expected. ' +
+      'The question is how much worse. A larger gap suggests the model was picking up on era-specific quirks (like rule changes or play style trends from 2005\u20132022) that don\'t hold in recent seasons.</div>';
+    html += '</div>';
+  }
+
+  // Disagreement shift
+  var cA = DATA.categories.cv_with_spread;
+  var cB = DATA.categories.cv_without_spread;
+  if (cA && cA.length > 0 && cB && cB.length > 0) {
+    html += '<div class="card">';
+    html += '<h2>How Removing the Spread Changes Who Gets It Right</h2>';
+    html += '<p class="description">When we remove the betting line, the models agree with each other less often. ' +
+      'Each model\'s unique contributions shift. Look for categories like <strong>"Only LSTM"</strong> increasing&mdash;' +
+      'that means the neural network is finding patterns the other models can\'t see without market help.</p>';
+
+    var allCatsSet = {};
+    cA.forEach(function(c) { allCatsSet[c.category] = true; });
+    cB.forEach(function(c) { allCatsSet[c.category] = true; });
+    var allCats = Object.keys(allCatsSet).sort();
+
+    html += '<table><tr><th>Who Got It Right</th><th>With Spread</th><th>Share</th><th>Without</th><th>Share</th><th>Change</th></tr>';
+    for (var ci = 0; ci < allCats.length; ci++) {
+      var cat = allCats[ci];
+      var ca = cA.find(function(c) { return c.category === cat; }) || {n: 0, pct: 0};
+      var cb = cB.find(function(c) { return c.category === cat; }) || {n: 0, pct: 0};
+      var shift = cb.pct - ca.pct;
+      var shiftCls = shift > 0 ? "delta-pos" : shift < 0 ? "delta-neg" : "";
+      html += '<tr><td><span class="cat-badge ' + cat + '">' + formatCatName(cat) + '</span></td>';
+      html += '<td>' + ca.n + '</td><td>' + ca.pct + '%</td>';
+      html += '<td>' + cb.n + '</td><td>' + cb.pct + '%</td>';
+      html += '<td class="' + shiftCls + '">' + (shift > 0 ? "+" : "") + shift.toFixed(1) + '%</td></tr>';
+    }
+    html += '</table>';
+    html += '</div>';
+  }
+
+  // Per-season
+  var ssA = DATA.seasons.cv_with_spread;
+  if (ssA && ssA.length > 0) {
+    html += '<div class="card">';
+    html += '<h2>Season-by-Season Performance</h2>';
+    html += '<p class="description">Each season served as a held-out test during training. The model learned from all earlier seasons ' +
+      'and predicted the next one. This shows whether any model is consistently best, or whether ' +
+      'the best model changes depending on the season.</p>';
+    html += '<table><tr><th>Season</th><th>Games</th><th>Upset Rate</th>';
+    html += '<th style="color:var(--lr-color)">LR</th>';
+    html += '<th style="color:var(--xgb-color)">XGB</th>';
+    html += '<th style="color:var(--lstm-color)">LSTM</th></tr>';
+    for (var ri = 0; ri < ssA.length; ri++) {
+      var row = ssA[ri];
+      var aucs = [row.lr_auc, row.xgb_auc, row.lstm_auc];
+      var bestIdx = aucs.indexOf(Math.max.apply(null, aucs.filter(function(a) { return !isNaN(a); })));
+      html += '<tr><td>' + row.season + '</td><td>' + row.n + '</td><td>' + (row.upset_rate*100).toFixed(1) + '%</td>';
+      html += '<td class="lr">' + fmtAuc(row.lr_auc) + (bestIdx===0?' \u2605':'') + '</td>';
+      html += '<td class="xgb">' + fmtAuc(row.xgb_auc) + (bestIdx===1?' \u2605':'') + '</td>';
+      html += '<td class="lstm">' + fmtAuc(row.lstm_auc) + (bestIdx===2?' \u2605':'') + '</td></tr>';
+    }
+    html += '</table>';
+    html += '</div>';
+  }
+
+  el.innerHTML = html;
+}
+
+init();
+</script>
+</body>
+</html>

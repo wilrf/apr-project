@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import json
+import os
 import socket
+import time
 from contextlib import contextmanager
+from pathlib import Path
 from typing import Iterator, List
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 import numpy as np
@@ -33,6 +37,18 @@ PBP_URL_TEMPLATE = (
     "https://github.com/nflverse/nflverse-data/releases/download/pbp/"
     "play_by_play_{season}.parquet"
 )
+PBP_CACHE_DIR = Path(
+    os.environ.get(
+        "APR_PBP_CACHE_DIR",
+        str(Path.home() / ".cache" / "apr-research" / "pbp"),
+    )
+)
+PBP_DOWNLOAD_TIMEOUT = int(os.environ.get("APR_PBP_DOWNLOAD_TIMEOUT", "300"))
+PBP_DOWNLOAD_RETRIES = int(os.environ.get("APR_PBP_DOWNLOAD_RETRIES", "4"))
+PBP_DOWNLOAD_BACKOFF_SECONDS = float(
+    os.environ.get("APR_PBP_DOWNLOAD_BACKOFF_SECONDS", "2.0")
+)
+PBP_DOWNLOAD_CHUNK_SIZE = 1024 * 1024
 _DOH_ENDPOINTS = (
     "https://dns.google/resolve?name={host}&type=A",
     "https://cloudflare-dns.com/dns-query?name={host}&type=A",
@@ -98,30 +114,96 @@ def _github_dns_override() -> Iterator[None]:
         socket.getaddrinfo = original_getaddrinfo
 
 
+def _pbp_cache_path(season: int) -> Path:
+    """Return the cache path for one season's nflverse parquet file."""
+    return PBP_CACHE_DIR / f"play_by_play_{season}.parquet"
+
+
+def _is_retryable_download_error(error: Exception) -> bool:
+    """Return whether a download error is worth retrying."""
+    if isinstance(error, HTTPError):
+        return error.code >= 500 or error.code in {408, 429}
+    return isinstance(
+        error, (TimeoutError, socket.timeout, URLError, OSError, EOFError)
+    )
+
+
+def _download_pbp_season(season: int, destination: Path) -> Path:
+    """Download one nflverse parquet file to a stable local cache path."""
+    url = PBP_URL_TEMPLATE.format(season=season)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    last_error: Exception | None = None
+
+    with _github_dns_override():
+        for attempt in range(1, PBP_DOWNLOAD_RETRIES + 1):
+            temp_path = destination.with_suffix(
+                f"{destination.suffix}.part.{os.getpid()}.{attempt}"
+            )
+            try:
+                request = Request(url, headers={"User-Agent": "apr-research/1.0"})
+                with urlopen(request, timeout=PBP_DOWNLOAD_TIMEOUT) as response:
+                    with temp_path.open("wb") as handle:
+                        while True:
+                            chunk = response.read(PBP_DOWNLOAD_CHUNK_SIZE)
+                            if not chunk:
+                                break
+                            handle.write(chunk)
+
+                if temp_path.stat().st_size == 0:
+                    raise RuntimeError("empty file returned")
+
+                temp_path.replace(destination)
+                return destination
+            except Exception as exc:
+                last_error = exc
+                temp_path.unlink(missing_ok=True)
+                if attempt >= PBP_DOWNLOAD_RETRIES or not _is_retryable_download_error(
+                    exc
+                ):
+                    break
+                time.sleep(PBP_DOWNLOAD_BACKOFF_SECONDS * attempt)
+
+    raise RuntimeError(
+        "Failed to download play-by-play data for "
+        f"season {season} after {PBP_DOWNLOAD_RETRIES} attempts: {last_error}"
+    ) from last_error
+
+
+def _load_pbp_season(season: int) -> pd.DataFrame:
+    """Load one season of play-by-play, refreshing a bad cache file if needed."""
+    cache_path = _pbp_cache_path(season)
+
+    for attempt in range(2):
+        if not cache_path.exists():
+            _download_pbp_season(season, cache_path)
+
+        try:
+            return pd.read_parquet(cache_path, columns=_PBP_COLUMNS)
+        except Exception as exc:
+            cache_path.unlink(missing_ok=True)
+            if attempt == 1:
+                raise RuntimeError(
+                    "Failed to load play-by-play data for "
+                    f"season {season} from nflverse cache: {exc}"
+                ) from exc
+
+    raise RuntimeError(
+        f"Failed to load play-by-play data for season {season}: unknown error."
+    )
+
+
 def _load_pbp_data(seasons: List[int]) -> pd.DataFrame:
     """Load play-by-play parquet files directly from nflverse releases."""
     frames = []
 
-    with _github_dns_override():
-        for season in seasons:
-            try:
-                frame = pd.read_parquet(
-                    PBP_URL_TEMPLATE.format(season=season),
-                    columns=_PBP_COLUMNS,
-                )
-            except Exception as e:
-                raise RuntimeError(
-                    "Failed to load play-by-play data for "
-                    f"season {season} from nflverse: {e}"
-                ) from e
-
-            if frame.empty:
-                raise RuntimeError(
-                    "Failed to load play-by-play data for "
-                    f"season {season} from nflverse: empty dataset returned."
-                )
-
-            frames.append(frame)
+    for season in seasons:
+        frame = _load_pbp_season(season)
+        if frame.empty:
+            raise RuntimeError(
+                "Failed to load play-by-play data for "
+                f"season {season} from nflverse: empty dataset returned."
+            )
+        frames.append(frame)
 
     if not frames:
         raise RuntimeError("Failed to load play-by-play data: no seasons were loaded.")

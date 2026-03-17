@@ -19,10 +19,36 @@ Running bullet list of framing decisions, key sentences, and positioning claims 
 - Closest precedents: ensemble uncertainty estimation (Lakshminarayanan et al. 2017), co-validation for error estimation, medical diagnostic modality comparison
 - The 4-type upset taxonomy (Market Error, Interaction, Temporal, Unpredictable) is a genuine contribution
 
+## Key Empirical Findings (March 2026)
+
+### CV Performance (6-fold, 1,162 games)
+- All three models competitive: LR 0.650 > LSTM 0.641 > XGB 0.638
+- LSTM is NOT the weak link — it performs on par with XGB
+
+### Spread Ablation
+- Removing spread hurts all models: LR -0.079, XGB -0.072, LSTM -0.067
+- **LSTM degrades least and wins without spread** (0.574 > 0.571 > 0.566)
+- This is the strongest evidence for distinct temporal signal independent of the market
+- LSTM exclusive predictions double from 5.6% → 11.0% without spread
+- All-model agreement drops from 74.7% → 55.3%
+
+### LSTM Exclusive Contribution
+- In CV, LSTM's exclusive value is primarily **moderating false alarms** (53/65 exclusives are non-upset rejections)
+- Only 12/65 are upsets caught that both LR and XGB miss
+- This reframes the LSTM's role: not "temporal upset detector" but "temporal false-alarm filter"
+
+### CV-to-Test Gap
+- LSTM: 0.641 → 0.520 (largest gap, -0.121)
+- LR: 0.650 → 0.562 (-0.088), XGB: 0.638 → 0.576 (-0.062)
+- Temporal patterns generalize less well forward than static features
+- LSTM-LR/XGB correlation drops from ~0.75 (CV) to ~0.30 (test) — LSTM diverges more in truly out-of-sample data
+
 ## Honest Limitations to Foreground
-- LSTM exclusive catches may not survive significance testing (permutation p=0.17 in prior run)
-- ~42% of upsets are genuinely unpredictable from historical data
-- Weak temporal signal exists but may not be actionable
+- LSTM temporal signal exists in CV but generalizes poorly forward (0.12 AUC gap vs 0.06 for XGB)
+- LSTM exclusive catches are mostly non-upset rejections, not upset detections
+- Calibrated probabilities compress disagreement analysis — threshold-based categories lose discriminative power
+- ~29% of CV predictions are "all wrong" — the irreducible floor remains large
+- Significance tests still pending under the current architecture
 - This builds credibility — reviewers trust papers that acknowledge limits
 
 ## Key Citations for Framing

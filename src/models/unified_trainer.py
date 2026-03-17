@@ -23,6 +23,7 @@ from src.models.lstm_config import (
     TUNED_LSTM_TRAINING_PARAMS,
 )
 from src.models.lstm_model import SiameseLSTMDataset, SiameseUpsetLSTM
+from src.models.prediction_utils import safe_team_str
 from src.models.sequence_builder import (
     MATCHUP_FEATURES,
     SEQUENCE_FEATURES,
@@ -30,11 +31,6 @@ from src.models.sequence_builder import (
     build_siamese_sequences,
 )
 from src.models.xgboost_model import UpsetXGBoost
-
-
-def _safe_team_str(value: object) -> str:
-    """Convert a team name value to string, handling NaN/None."""
-    return "" if pd.isna(value) else str(value)
 
 
 @dataclass
@@ -591,8 +587,8 @@ class UnifiedTrainer:
                     game_id=game_id,
                     season=int(row["season"]),
                     week=int(row["week"]),
-                    underdog=_safe_team_str(row.get("underdog", "")),
-                    favorite=_safe_team_str(row.get("favorite", "")),
+                    underdog=safe_team_str(row.get("underdog", "")),
+                    favorite=safe_team_str(row.get("favorite", "")),
                     spread_magnitude=float(row.get("spread_magnitude", 0)),
                     y_true=int(y_true[i]),
                     lr_prob=float(lr_probs[i]),

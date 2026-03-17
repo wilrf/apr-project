@@ -29,8 +29,9 @@ from src.evaluation.metrics import (
 from src.features import pipeline
 from src.features.pipeline import get_xgb_feature_columns
 from src.models.lstm_config import TUNED_LSTM_TRAINING_PARAMS
+from src.models.prediction_utils import safe_team_str
 from src.models.sequence_builder import build_siamese_sequences
-from src.models.unified_trainer import GamePrediction, UnifiedTrainer, _safe_team_str
+from src.models.unified_trainer import GamePrediction, UnifiedTrainer
 
 # Paths
 DATA_DIR = Path("data/features")
@@ -169,8 +170,8 @@ def build_game_predictions(test_df, y_true, lr_probs, xgb_probs, lstm_probs):
                 game_id=game_id,
                 season=int(row["season"]),
                 week=int(row["week"]),
-                underdog=_safe_team_str(row.get("underdog", "")),
-                favorite=_safe_team_str(row.get("favorite", "")),
+                underdog=safe_team_str(row.get("underdog", "")),
+                favorite=safe_team_str(row.get("favorite", "")),
                 spread_magnitude=float(row.get("spread_magnitude", 0)),
                 y_true=int(y_true[i]),
                 lr_prob=float(lr_probs[i]),

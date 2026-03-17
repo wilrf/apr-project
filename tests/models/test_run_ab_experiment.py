@@ -57,3 +57,17 @@ def test_main_full_mode_skips_quick_ab(monkeypatch):
     run_ab_experiment.main()
 
     assert calls == ["full"]
+
+
+def test_pick_auc_winner_ignores_nan_scores():
+    assert run_ab_experiment._pick_auc_winner(0.61, np.nan) == "LR"
+    assert run_ab_experiment._pick_auc_winner(np.nan, 0.58) == "XGB"
+    assert run_ab_experiment._pick_auc_winner(np.nan, np.nan) == "N/A"
+
+
+def test_rank_models_by_auc_places_nan_scores_last():
+    ranked = run_ab_experiment._rank_models_by_auc(
+        {"lr": 0.61, "xgb": np.nan, "lstm": 0.55}
+    )
+
+    assert [name for name, _ in ranked] == ["lr", "lstm", "xgb"]
