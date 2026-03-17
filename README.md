@@ -25,14 +25,6 @@ that a single mechanism caused the upset.
 The strongest claim is not "deep learning beats simpler models." It does not. The stronger claim is
 that model-class disagreement is informative about representation-sensitive failure modes.
 
-## Current Snapshot
-
-The numbers below are taken from the current saved prediction artifacts in:
-
-- `results/ab_experiment/predictions_with_spread.csv`
-- `results/ab_experiment/predictions_without_spread.csv`
-- `results/test/predictions.csv`
-
 ### Data
 
 - Train: 3,495 labeled games from 2005-2022, upset rate 30.36%
@@ -94,7 +86,6 @@ The project supports a measured version of the disagreement thesis:
 - If they split, the game may depend on a representation-specific cue.
 - If they all fail, the event may be weakly signaled in the current feature set or driven by factors the repo does not observe.
 
-That is a useful research framing, but it is not the same as claiming direct causal identification.
 
 ## Repo Structure
 
