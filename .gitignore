@@ -61,3 +61,6 @@ Thumbs.db
 
 # Worktrees
 .worktrees/
+
+# Output artifacts
+output/
