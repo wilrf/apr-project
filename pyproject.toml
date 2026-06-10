@@ -20,13 +20,18 @@ dependencies = [
 [project.optional-dependencies]
 lstm = ["torch>=2.0.0"]
 dashboard = ["fastapi>=0.110.0", "uvicorn>=0.29.0"]
+# Dev tooling is pinned to exact versions for reproducibility: linters,
+# formatters, and the type checker produce version-dependent output, so an
+# unpinned range lets a fresh CI install drift from local and break the gate
+# (e.g. a newer black reformatting files local black considers clean). These
+# pins match the versions used to validate the repo locally and in pre-commit.
 dev = [
-    "pytest>=7.4.0",
-    "pytest-cov>=4.1.0",
-    "black>=23.9.0",
-    "ruff>=0.1.0",
-    "mypy>=1.8.0",
-    "pre-commit>=3.5.0",
+    "pytest==8.4.2",
+    "pytest-cov==7.1.0",
+    "black==25.11.0",
+    "ruff==0.15.16",
+    "mypy==1.19.1",
+    "pre-commit==4.3.0",
 ]
 
 [build-system]
