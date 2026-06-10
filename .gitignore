@@ -64,3 +64,10 @@ Thumbs.db
 
 # Output artifacts
 output/
+
+# Stale Claude worktrees
+.claude/worktrees/
+
+# Dashboard build artifacts (Track C)
+dashboard/frontend/node_modules/
+dashboard/frontend/dist/
