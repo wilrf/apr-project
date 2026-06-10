@@ -89,6 +89,18 @@ domain must never violate), and `simplicity`. Mechanics that make it work:
   one environment's workflow agents all died on a model/API incompatibility
   until the model was pinned per-call.
 
+**Give the simplicity lens teeth.** Unprimed, a `simplicity` verifier returns
+style nits and earns its skip. Prime it to hunt the changes that compound:
+reuse an existing helper before adding a new one (*search first*); altitude (is
+this logic at the right layer, and does each new abstraction earn its keep);
+**delete-on-replacement** (when you swap an implementation, the old one leaves
+with it — no commented-out block, no parallel dead path); and smallest readable
+diff (fewer lines that stay clear beats clever density). Like the domain lens,
+it only pays when told what to look for. *(Convergence note: CSA practiced this
+priming in every panel prompt without ever writing it down; apr-research read
+the playbook cold and found the hole — "practiced in one organism, articulated
+by another" is the most common convergence form a playbook exists to capture.)*
+
 **This repo's domain-invariant lens — data/eval validity.** For an ML research
 repo the invariant that quietly destroys the result isn't auth or money, it's
 *leakage*. Prime the domain verifier to hunt, in priority order:
@@ -113,6 +125,25 @@ repo the invariant that quietly destroys the result isn't auth or money, it's
 A green test suite with leaked folds reports an AUC that doesn't survive contact
 with new seasons. This is the lens that pays here, the way visibility/security
 pays for a web app — give it its own verifier and prime it with these classes.
+
+**This repo's simplicity hunt — clutter is dead analysis code.** A research repo
+accumulates exhaust, so prime the simplicity lens with the global rule *delete
+deprecated files rather than leaving them around*, plus these repo-specific
+targets (it surfaces them for a delete/keep call — adjudicate, don't auto-obey):
+
+- **Documented-dead modules.** `src/evaluation/comparison.py` (`ModelComparison`)
+  is marked UNUSED in production by CLAUDE.md's change-impact map — the textbook
+  "kept for reference" dead code the rule targets. Anything the impact map flags
+  dead is fair game to surface.
+- **Orphaned sidecars / experiment scripts.** One-off tools under `tools/`
+  (dashboard, presentation, `numerical_audit_compute.py`) and any analysis
+  script not wired into the pipeline — make them earn their place or go.
+- **Loose scratch docs at repo root.** Working files like `audit_results.md`,
+  `slide_reconciliation.md`, stray `Untitled*.md` / `.docx` belong in `docs/`,
+  archived, or deleted — not the root.
+- **Stale result artifacts.** Superseded reports/metrics left beside fresh ones
+  in `results/`; CLAUDE.md warns pre-March-2026 numbers are stale, so flag
+  duplicated or out-of-date outputs.
 
 ---
 
