@@ -1839,7 +1839,9 @@ def main() -> None:
     results_dir.mkdir(exist_ok=True)
     (results_dir / "audit_computed.json").write_text(json.dumps(audit, indent=2))
 
-    (ROOT / "docs" / "development" / "audit_results.md").write_text(render_audit_results(audit))
+    (ROOT / "docs" / "development" / "audit_results.md").write_text(
+        render_audit_results(audit)
+    )
     (ROOT / "docs" / "development" / "slide_reconciliation.md").write_text(
         render_slide_reconciliation(audit)
     )

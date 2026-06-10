@@ -102,7 +102,10 @@ def build_payload() -> dict:
     for key, path in [
         ("test", RESULTS / "test" / "predictions.csv"),
         ("cv_with_spread", RESULTS / "ab_experiment" / "predictions_with_spread.csv"),
-        ("cv_without_spread", RESULTS / "ab_experiment" / "predictions_without_spread.csv"),
+        (
+            "cv_without_spread",
+            RESULTS / "ab_experiment" / "predictions_without_spread.csv",
+        ),
     ]:
         recs = _load_csv(path)
         if recs is not None:
