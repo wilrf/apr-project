@@ -24,7 +24,6 @@ These cause bugs if violated:
 - **No week-1 games** in labeled data (no prior stats exist for rolling features).
 - **Rolling window crosses seasons** by design (3-game window carries over). LSTM history is keyed by team (not by season).
 - **ReportGenerator threshold**: If passing both `threshold=` and `disagreement_analyzer=`, they must agree or `ValueError` is raised.
-- **comparison.py is unused**: `ModelComparison` is not imported anywhere in production. Use `DisagreementAnalyzer` instead.
 - **Pre-March-2026 metrics are stale**: Old ~21% upset rate numbers are historical only.
 - Do not edit `.claude/settings.local.json` for repo-wide policy changes.
 
@@ -46,7 +45,6 @@ cv_splitter.py                  → trainer, lstm_trainer, unified_trainer,
 disagreement.py                 → evaluate_test_set, run_ab_experiment
 calibration.py                  → evaluate_test_set
 report.py                       → disagreement.py (delegates for summary)
-comparison.py                   → (UNUSED in production — dead code)
 merger.py (column output)       → generate_features, verify_data, pipeline.py
 betting_loader.py (team abbrs)  → merger, generate_features, verify_data
 logistic_model.py (interface)   → unified_trainer, run_ab_experiment

@@ -9,7 +9,6 @@ Core modules:
                     (2021-2022) predictions, applied to test predictions.
   metrics.py      — Calibration error, Brier score, baseline comparisons.
   report.py       — Markdown report generation.
-  comparison.py   — Model comparison utilities.
   shap_analysis.py — SHAP feature importance for XGBoost.
 
 If you change disagreement categories → update evaluate_test_set, run_ab_experiment.
