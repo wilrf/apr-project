@@ -68,3 +68,11 @@ files = ["src"]
 # Pragmatic start: do not require full annotations yet.
 disallow_untyped_defs = false
 check_untyped_defs = false
+
+# Do not follow imports into these heavy third-party packages' source. Their
+# installed source can use newer-Python syntax (e.g. mlflow ships 3.10+ match
+# statements) that mypy rejects when type-checking against our 3.9 floor. We
+# type-check our own code, not our dependencies' internals.
+[[tool.mypy.overrides]]
+module = ["mlflow.*", "torch.*"]
+follow_imports = "skip"
