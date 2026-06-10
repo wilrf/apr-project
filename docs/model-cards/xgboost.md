@@ -6,7 +6,10 @@ matchup view as the baseline, enriched with per-game stats from recent games.
 ## Features
 - 70 features (66 in the no-spread variant): 46 base features + 24 lag features
   (per-game stats for the last 3 games). Canonical list: `src/features/pipeline.py`.
-- Tree depth: `max_depth = 6` (`src/models/xgboost_model.py`).
+- Tree depth: `max_depth = 2` as trained (the conservative value set by
+  `UnifiedTrainer`/`run_ab_experiment` and used to produce the frozen artifacts;
+  the `UpsetXGBoost` constructor default of 6 in `src/models/xgboost_model.py` is
+  overridden in every production training path).
 
 ## Training data
 - 3,495 labeled games, 2005–2022. Labels apply only to games with `spread >= 3`;
