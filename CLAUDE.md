@@ -77,7 +77,7 @@ Before changing production code for any claimed bug, follow **red-green-trace** 
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt        # includes PyTorch for LSTM
+pip install -e ".[dev,lstm]"   # editable install incl. PyTorch (lstm) + dev tools
 python3 -m src.data.generate_features  # regenerate train.csv + test.csv
 ```
 
