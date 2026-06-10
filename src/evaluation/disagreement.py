@@ -253,8 +253,13 @@ class DisagreementAnalyzer:
                             np.mean([p.spread_magnitude for p in preds])
                         ),
                         "upset_rate": float(np.mean([p.y_true for p in preds])),
-                        f"avg_{prob_attr.replace('_prob', '')}_confidence": np.mean(
-                            [abs(getattr(p, prob_attr) - self.threshold) for p in preds]
+                        f"avg_{prob_attr.replace('_prob', '')}_confidence": float(
+                            np.mean(
+                                [
+                                    abs(getattr(p, prob_attr) - self.threshold)
+                                    for p in preds
+                                ]
+                            )
                         ),
                     },
                     example_games=[p.game_id for p in preds[:5]],
