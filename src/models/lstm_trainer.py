@@ -214,7 +214,8 @@ class SiameseLSTMTrainer:
         best_val_loss = float("inf")
         best_model_state = None
         patience_counter = 0
-        history = {"train_loss": [], "val_loss": []}
+        # Holds per-epoch loss lists plus scalar summary fields added below.
+        history: Dict[str, Any] = {"train_loss": [], "val_loss": []}
 
         for epoch in range(self.epochs):
             train_loss = self._train_epoch(model, train_loader, optimizer, criterion)

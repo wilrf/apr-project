@@ -57,14 +57,14 @@ class ReportGenerator:
             ]
             self.threshold = float(np.mean(all_y)) if all_y else 0.5
 
-        self._summary = None
+        self._summary: Optional[Dict[str, Any]] = None
 
     def generate_summary(self) -> Dict[str, Any]:
         """Generate comprehensive summary of all model results."""
         if self._summary:
             return self._summary
 
-        summary = {
+        summary: Dict[str, Any] = {
             "generated_at": datetime.now().isoformat(),
             "models": {},
             "comparison": {},
@@ -97,7 +97,7 @@ class ReportGenerator:
 
     def _generate_comparison(self) -> Dict[str, Any]:
         """Generate pairwise model comparisons."""
-        comparison = {
+        comparison: Dict[str, Any] = {
             "metric_rankings": {},
             "pairwise": {},
             "agreement": {},

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, cast
 
 import numpy as np
 import pandas as pd
@@ -120,8 +120,14 @@ class UpsetXGBoost:
         if self.model is None:
             raise ValueError("Model not fitted. Call fit() first.")
 
-        importance = self.model.get_booster().get_score(importance_type=importance_type)
+        # get_score() is typed to allow list values, but for scalar importance
+        # types ('gain'/'weight'/'cover') — the only ones used here — each value
+        # is a single float; cast narrows the stub's Union to that reality.
+        importance = cast(
+            Dict[str, float],
+            self.model.get_booster().get_score(importance_type=importance_type),
+        )
 
         # Map back to feature names
         # When fitted with DataFrame, get_score() uses actual feature names as keys
-        return {name: importance.get(name, 0.0) for name in self.feature_names}
+        return {name: float(importance.get(name, 0.0)) for name in self.feature_names}

@@ -166,7 +166,9 @@ def run_quick_ab(train_df) -> Dict[str, QuickResult]:
         )
         print(f"{'='*60}")
 
-        all_lr_probs, all_xgb_probs, all_y = [], [], []
+        all_lr_probs: List[float] = []
+        all_xgb_probs: List[float] = []
+        all_y: List[float] = []
 
         for fold_idx, (train_idx, val_idx) in enumerate(cv.split(train_df)):
             fold_train = train_df.iloc[train_idx]
@@ -215,7 +217,9 @@ def run_quick_ab(train_df) -> Dict[str, QuickResult]:
             C=0.1, penalty="l1", solver="saga", random_state=42
         )
         lr_final.fit(train_df[config.feature_cols], train_df["upset"])
-        lr_coefs = lr_final.model.coef_[0] if hasattr(lr_final, "model") else None
+        # model is set by fit() above; the None check also narrows the Optional
+        # for the type checker (hasattr was always true since model is an attr).
+        lr_coefs = lr_final.model.coef_[0] if lr_final.model is not None else None
 
         results[config.name] = QuickResult(
             config=config,

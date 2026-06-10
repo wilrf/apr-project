@@ -102,7 +102,9 @@ def load_betting_data(
     def convert(name: object) -> object:
         if pd.isna(name):
             return name
-        return normalize_team_abbr(TEAM_NAME_TO_ABBR.get(name, name))
+        # After the NaN guard, team-name cells are plain strings.
+        name_str = str(name)
+        return normalize_team_abbr(TEAM_NAME_TO_ABBR.get(name_str, name_str))
 
     for col in ["team_home", "team_away"] + (
         ["team_favorite_id"] if "team_favorite_id" in df.columns else []

@@ -96,7 +96,9 @@ class DisagreementAnalyzer:
         """
         self.predictions = predictions
         if threshold is None:
-            base_rate = np.mean([p.y_true for p in predictions]) if predictions else 0.5
+            base_rate = (
+                float(np.mean([p.y_true for p in predictions])) if predictions else 0.5
+            )
             self.threshold = base_rate
         else:
             self.threshold = threshold
@@ -167,13 +169,23 @@ class DisagreementAnalyzer:
                     category=cat,
                     count=len(preds),
                     pct_of_total=len(preds) / total * 100 if total > 0 else 0,
-                    upset_rate=np.mean([p.y_true for p in preds]) if preds else 0,
-                    avg_spread=(
-                        np.mean([p.spread_magnitude for p in preds]) if preds else 0
+                    upset_rate=(
+                        float(np.mean([p.y_true for p in preds])) if preds else 0
                     ),
-                    avg_lr_prob=np.mean([p.lr_prob for p in preds]) if preds else 0,
-                    avg_xgb_prob=np.mean([p.xgb_prob for p in preds]) if preds else 0,
-                    avg_lstm_prob=np.mean([p.lstm_prob for p in preds]) if preds else 0,
+                    avg_spread=(
+                        float(np.mean([p.spread_magnitude for p in preds]))
+                        if preds
+                        else 0
+                    ),
+                    avg_lr_prob=(
+                        float(np.mean([p.lr_prob for p in preds])) if preds else 0
+                    ),
+                    avg_xgb_prob=(
+                        float(np.mean([p.xgb_prob for p in preds])) if preds else 0
+                    ),
+                    avg_lstm_prob=(
+                        float(np.mean([p.lstm_prob for p in preds])) if preds else 0
+                    ),
                 )
             )
 
@@ -237,8 +249,10 @@ class DisagreementAnalyzer:
                     category=cat,
                     description=description,
                     key_features={
-                        "avg_spread": np.mean([p.spread_magnitude for p in preds]),
-                        "upset_rate": np.mean([p.y_true for p in preds]),
+                        "avg_spread": float(
+                            np.mean([p.spread_magnitude for p in preds])
+                        ),
+                        "upset_rate": float(np.mean([p.y_true for p in preds])),
                         f"avg_{prob_attr.replace('_prob', '')}_confidence": np.mean(
                             [abs(getattr(p, prob_attr) - self.threshold) for p in preds]
                         ),

@@ -51,3 +51,14 @@ line-length = 88
 
 [tool.ruff.lint]
 select = ["E", "F", "I"]
+
+[tool.mypy]
+python_version = "3.9"
+ignore_missing_imports = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+no_implicit_optional = true
+files = ["src"]
+# Pragmatic start: do not require full annotations yet.
+disallow_untyped_defs = false
+check_untyped_defs = false

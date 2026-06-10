@@ -107,7 +107,9 @@ def _github_dns_override() -> Iterator[None]:
             return original_getaddrinfo(override_ip, port, family, type, proto, flags)
         return original_getaddrinfo(host, port, family, type, proto, flags)
 
-    socket.getaddrinfo = patched_getaddrinfo
+    # Deliberate monkeypatch: our wrapper's signature intentionally differs from
+    # the stdlib getaddrinfo overload, so mypy's assignment check does not apply.
+    socket.getaddrinfo = patched_getaddrinfo  # type: ignore[assignment]
     try:
         yield
     finally:

@@ -7,7 +7,7 @@ probabilities from different models are comparable for disagreement analysis.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional, Protocol, Tuple
 
 import numpy as np
 import pandas as pd
@@ -22,6 +22,14 @@ class CalibrationResult:
     raw: np.ndarray
     calibrated: np.ndarray
     method: str
+
+
+class Calibrator(Protocol):
+    """Common interface shared by PlattScaler and IsotonicCalibrator."""
+
+    def fit(self, probs: np.ndarray, y_true: np.ndarray) -> "Calibrator": ...
+
+    def transform(self, probs: np.ndarray) -> np.ndarray: ...
 
 
 class PlattScaler:
@@ -97,6 +105,7 @@ def calibrate_models(
     results: Dict[str, CalibrationResult] = {}
 
     for name in cal_probs:
+        scaler: Calibrator
         if method == "platt":
             scaler = PlattScaler().fit(cal_probs[name], cal_y_true)
         elif method == "isotonic":

@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 from src.data.betting_loader import load_betting_data
-from src.data.merger import merge_nfl_betting_data
+from src.data.merger import MergeAudit, merge_nfl_betting_data
 from src.data.nfl_loader import load_schedules
 
 
@@ -67,7 +67,7 @@ def verify_data_coverage(
 
 def _write_data_readme(
     coverage: Dict[int, Dict[str, Any]],
-    audit: Dict[str, Any],
+    audit: MergeAudit,
     output_path: Path,
 ) -> None:
     """Write data README with coverage information."""
