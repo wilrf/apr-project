@@ -104,7 +104,7 @@ python3 -m src.models.run_ab_experiment            # All 3 models (~15 min)
 
 ## Bughunt Status
 
-See [`BUGHUNT.md`](BUGHUNT.md) for the full list of 43 bugs found 2026-03-09. Current status:
+See [`BUGHUNT.md`](docs/development/BUGHUNT.md) for the full list of 43 bugs found 2026-03-09. Current status:
 - **All HIGH bugs resolved** (H1–H15). H4 was a false positive (algebraically correct formula).
 - **CRITICAL bugs resolved** (C1 test gap remains at MEDIUM priority, C2 fully tested).
-- MEDIUM/LOW bugs remain open — see BUGHUNT.md for details.
+- MEDIUM/LOW bugs remain open — see docs/development/BUGHUNT.md for details.

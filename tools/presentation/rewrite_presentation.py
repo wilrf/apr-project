@@ -130,7 +130,7 @@ def rewrite_slide_2(slide):
 
 
 def rewrite_slide_3(slide):
-    """Research Question — add the diagnostic reframe from PROJECT.md."""
+    """Research Question — add the diagnostic reframe from docs/architecture-and-analysis.md."""
     shapes = slide.shapes
     # Shape 2: question
     set_paragraphs(shapes[2].text_frame, [
