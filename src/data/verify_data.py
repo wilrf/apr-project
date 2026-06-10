@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import pandas as pd
 from pathlib import Path
-from typing import Dict, List, Any
+from typing import Any, Dict, List
 
-from src.data.nfl_loader import load_schedules
 from src.data.betting_loader import load_betting_data
 from src.data.merger import merge_nfl_betting_data
+from src.data.nfl_loader import load_schedules
 
 
 def verify_data_coverage(
@@ -83,13 +82,14 @@ def _write_data_readme(
 
     for season, stats in sorted(coverage.items()):
         lines.append(
-            f"| {season} | {stats['total_games']} | {stats['games_with_spread']} | {stats['coverage_pct']:.1f}% |"
+            f"| {season} | {stats['total_games']} | "
+            f"{stats['games_with_spread']} | {stats['coverage_pct']:.1f}% |"
         )
 
     lines.extend(
         [
             "",
-            f"## Merge Statistics",
+            "## Merge Statistics",
             "",
             f"- Overall merge rate: {audit['merge_rate']:.1%}",
             f"- Unmatched NFL games: {len(audit['unmatched_nfl'])}",
@@ -115,5 +115,6 @@ if __name__ == "__main__":
     for season, stats in results["coverage_by_season"].items():
         if stats["coverage_pct"] < 90:
             print(
-                f"WARNING: {season} has only {stats['coverage_pct']:.1f}% spread coverage"
+                f"WARNING: {season} has only "
+                f"{stats['coverage_pct']:.1f}% spread coverage"
             )

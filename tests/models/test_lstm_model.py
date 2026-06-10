@@ -1,10 +1,11 @@
 # tests/models/test_lstm_model.py
 """Tests for Siamese LSTM model."""
+import numpy as np
 import pytest
 import torch
-import numpy as np
-from src.models.lstm_model import SiameseUpsetLSTM, SiameseLSTMDataset
-from src.models.sequence_builder import SEQUENCE_FEATURES, MATCHUP_FEATURES
+
+from src.models.lstm_model import SiameseLSTMDataset, SiameseUpsetLSTM
+from src.models.sequence_builder import MATCHUP_FEATURES, SEQUENCE_FEATURES
 
 
 class TestSiameseLSTMDataset:

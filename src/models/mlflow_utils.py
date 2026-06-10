@@ -1,9 +1,10 @@
 """MLflow integration utilities for experiment tracking."""
 
 from __future__ import annotations
+
 import logging
-from typing import Dict, Any, Optional
 from pathlib import Path
+from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 

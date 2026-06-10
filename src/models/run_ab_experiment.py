@@ -273,9 +273,7 @@ def print_quick_comparison(results: Dict[str, QuickResult]):
         lr_auc = r.lr_metrics["auc_roc"]
         xgb_auc = r.xgb_metrics["auc_roc"]
         winner = _pick_auc_winner(lr_auc, xgb_auc)
-        outcome = (
-            f"{winner} wins" if winner != "N/A" else "no defined winner"
-        )
+        outcome = f"{winner} wins" if winner != "N/A" else "no defined winner"
         print(
             f"  {label}: LR={_format_auc(lr_auc)}, "
             f"XGB={_format_auc(xgb_auc)} -> {outcome}"
@@ -378,9 +376,7 @@ def print_full_comparison(results: Dict[str, UnifiedCVResults]):
             k: r.aggregated_metrics[k]["auc_roc_mean"] for k in ["lr", "xgb", "lstm"]
         }
         ranked = _rank_models_by_auc(aucs)
-        ranking_str = " > ".join(
-            f"{k.upper()}({_format_auc(v)})" for k, v in ranked
-        )
+        ranking_str = " > ".join(f"{k.upper()}({_format_auc(v)})" for k, v in ranked)
         print(f"  {label}: {ranking_str}")
 
     # Correlation matrices

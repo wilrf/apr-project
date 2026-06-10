@@ -1,6 +1,7 @@
 # tests/models/test_cv_splitter.py
-import pytest
 import pandas as pd
+import pytest
+
 from src.models.cv_splitter import TimeSeriesCVSplitter
 
 

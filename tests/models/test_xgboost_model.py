@@ -1,7 +1,8 @@
 # tests/models/test_xgboost_model.py
-import pytest
-import pandas as pd
 import numpy as np
+import pandas as pd
+import pytest
+
 from src.models.xgboost_model import UpsetXGBoost
 
 

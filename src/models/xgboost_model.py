@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-import pandas as pd
-import numpy as np
-import xgboost as xgb
 from typing import Any, Dict, List, Optional
+
+import numpy as np
+import pandas as pd
+import xgboost as xgb
 
 
 class UpsetXGBoost:
