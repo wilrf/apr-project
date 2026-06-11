@@ -12,7 +12,8 @@ Models and their feature representations:
 Training infrastructure:
   cv_splitter.py      — Expanding-window time-series CV (6 folds, 2017-2022 val)
   unified_trainer.py  — Trains all 3 models on identical folds with model-specific
-                        feature routing. Produces GamePrediction/FoldResult/UnifiedCVResults.
+                        feature routing. Produces
+                        GamePrediction/FoldResult/UnifiedCVResults.
   lstm_trainer.py     — LSTM-specific training loop with DataLoader + early stopping
   sequence_builder.py — Builds team game-history sequences for LSTM; normalizes from
                         training stats only to prevent leakage

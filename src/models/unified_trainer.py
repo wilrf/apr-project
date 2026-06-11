@@ -115,7 +115,7 @@ class UnifiedCVResults:
 
     def _aggregate_metrics(self) -> Dict[str, Dict[str, float]]:
         """Aggregate metrics across all folds."""
-        metrics = {"lr": {}, "xgb": {}, "lstm": {}}
+        metrics: Dict[str, Dict[str, float]] = {"lr": {}, "xgb": {}, "lstm": {}}
 
         for model_key, attr_name in [
             ("lr", "lr_metrics"),
@@ -427,7 +427,8 @@ class UnifiedTrainer:
         best_val_loss = float("inf")
         best_model_state = None
         patience_counter = 0
-        history: Dict[str, Any] = {"train_loss": [], "val_loss": []}
+        # Type already declared on the early-return branch above (Dict[str, Any]).
+        history = {"train_loss": [], "val_loss": []}
 
         torch.manual_seed(self.random_state)
         model.train()

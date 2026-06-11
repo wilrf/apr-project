@@ -6,7 +6,6 @@ from typing import Dict
 
 import pandas as pd
 
-
 DEFAULT_ELO = 1500.0
 DEFAULT_K_FACTOR = 20.0
 DEFAULT_HOME_ADVANTAGE = 50.0

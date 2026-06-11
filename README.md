@@ -1,5 +1,9 @@
 # NFL Upset Taxonomy via Multi-Architecture Disagreement
 
+[![CI](https://github.com/wilrf/apr-project/actions/workflows/ci.yml/badge.svg)](https://github.com/wilrf/apr-project/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-blue.svg)](pyproject.toml)
+
 This project studies NFL upset prediction as a diagnostic problem, not a leaderboard problem.
 Three model classes see the same games through different representations:
 
@@ -97,13 +101,17 @@ src/evaluation/     Metrics, calibration, disagreement analysis, and reports
 data/features/      Generated train/test feature CSVs
 results/            Saved prediction artifacts and reports
 docs/               Paper and presentation materials
+tools/              Sidecar utilities such as the local dashboard and presentation scripts
 ```
 
-## Reproduce
+## Quickstart
 
 ```bash
-python3 -m src.data.generate_features
-python3 -m src.models.run_ab_experiment --quick
-python3 -m src.models.evaluate_test_set
-python3 -m pytest tests/ --ignore=tests/models/test_lstm_model.py -v
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e ".[dev,lstm]"        # editable install incl. PyTorch + dev tools
+
+make features      # regenerate train.csv + test.csv
+make ab            # spread A/B experiment (quick: LR + XGB)
+make evaluate      # held-out test-set evaluation
+make test          # fast test suite
 ```

@@ -1,18 +1,86 @@
 [project]
 name = "nfl-upset-prediction"
 version = "0.1.0"
-description = "XGBoost vs LSTM comparison for NFL upset prediction"
-requires-python = ">=3.10"
+description = "Multi-architecture model disagreement for NFL upset prediction"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "Wil Fowler" }]
+
+# Runtime deps are pinned to the exact versions that generated and validate the
+# frozen results in results/. Unpinned ranges let a fresh install drift to newer
+# releases that change numerics or break across the Python matrix — e.g. a newer
+# xgboost emits base_score as "[4.1E-1]" that an unpinned shap cannot parse, and
+# numpy 2.x alters type/printing behavior. Pinning keeps every number anchored to
+# results/ and makes CI reproduce the local environment exactly (3.9-3.11 wheels).
+dependencies = [
+    "pandas==2.3.3",
+    "numpy==1.26.4",
+    "scipy==1.13.1",
+    "nfl-data-py==0.3.2",
+    "xgboost==2.1.4",
+    "scikit-learn==1.6.1",
+    "shap==0.49.1",
+    "mlflow==3.1.4",
+]
+
+[project.optional-dependencies]
+lstm = ["torch==2.8.0"]
+dashboard = ["fastapi==0.128.8", "uvicorn==0.39.0"]
+# Dev tooling is pinned to exact versions for reproducibility: linters,
+# formatters, and the type checker produce version-dependent output, so an
+# unpinned range lets a fresh CI install drift from local and break the gate
+# (e.g. a newer black reformatting files local black considers clean). These
+# pins match the versions used to validate the repo locally and in pre-commit.
+dev = [
+    "pytest==8.4.2",
+    "pytest-cov==7.1.0",
+    "black==25.11.0",
+    "ruff==0.15.16",
+    "mypy==1.19.1",
+    "pre-commit==4.3.0",
+    "httpx==0.28.1",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = "test_*.py"
-addopts = "-v --tb=short"
+addopts = "-q --tb=short"
 
 [tool.black]
 line-length = 88
-target-version = ["py310"]
+target-version = ["py39"]
 
 [tool.ruff]
 line-length = 88
+exclude = ["tools/"]
+
+[tool.ruff.lint]
 select = ["E", "F", "I"]
+
+[tool.mypy]
+python_version = "3.9"
+ignore_missing_imports = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+no_implicit_optional = true
+files = ["src", "dashboard/backend"]
+# Pragmatic start: do not require full annotations yet.
+disallow_untyped_defs = false
+check_untyped_defs = false
+
+# Do not follow imports into these heavy third-party packages' source. Their
+# installed source can use newer-Python syntax (e.g. mlflow ships 3.10+ match
+# statements) that mypy rejects when type-checking against our 3.9 floor. We
+# type-check our own code, not our dependencies' internals.
+[[tool.mypy.overrides]]
+module = ["mlflow.*", "torch.*"]
+follow_imports = "skip"

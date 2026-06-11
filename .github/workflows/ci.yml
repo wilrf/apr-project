@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  quality:
+    name: Lint, type-check, fast tests
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.10", "3.11"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Install (dev + lstm + dashboard)
+        run: pip install -e ".[dev,lstm,dashboard]"
+      - name: Ruff
+        run: python -m ruff check src/ tests/ dashboard/backend/
+      - name: Black
+        run: black --check src/ tests/ dashboard/backend/
+      - name: Mypy
+        run: python -m mypy
+      - name: Fast tests
+        run: python -m pytest tests/ --ignore=tests/models/test_lstm_model.py --ignore=tests/models/test_lstm_trainer.py -q
+
+  lstm-tests:
+    name: Slow LSTM tests (non-blocking)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install (dev + lstm + dashboard)
+        run: pip install -e ".[dev,lstm,dashboard]"
+      - name: LSTM tests
+        run: python -m pytest tests/models/test_lstm_model.py tests/models/test_lstm_trainer.py -q

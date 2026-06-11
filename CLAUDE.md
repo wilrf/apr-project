@@ -24,7 +24,6 @@ These cause bugs if violated:
 - **No week-1 games** in labeled data (no prior stats exist for rolling features).
 - **Rolling window crosses seasons** by design (3-game window carries over). LSTM history is keyed by team (not by season).
 - **ReportGenerator threshold**: If passing both `threshold=` and `disagreement_analyzer=`, they must agree or `ValueError` is raised.
-- **comparison.py is unused**: `ModelComparison` is not imported anywhere in production. Use `DisagreementAnalyzer` instead.
 - **Pre-March-2026 metrics are stale**: Old ~21% upset rate numbers are historical only.
 - Do not edit `.claude/settings.local.json` for repo-wide policy changes.
 
@@ -46,7 +45,6 @@ cv_splitter.py                  → trainer, lstm_trainer, unified_trainer,
 disagreement.py                 → evaluate_test_set, run_ab_experiment
 calibration.py                  → evaluate_test_set
 report.py                       → disagreement.py (delegates for summary)
-comparison.py                   → (UNUSED in production — dead code)
 merger.py (column output)       → generate_features, verify_data, pipeline.py
 betting_loader.py (team abbrs)  → merger, generate_features, verify_data
 logistic_model.py (interface)   → unified_trainer, run_ab_experiment
@@ -79,7 +77,7 @@ Before changing production code for any claimed bug, follow **red-green-trace** 
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt        # includes PyTorch for LSTM
+pip install -e ".[dev,lstm]"   # editable install incl. PyTorch (lstm) + dev tools
 python3 -m src.data.generate_features  # regenerate train.csv + test.csv
 ```
 
@@ -106,7 +104,7 @@ python3 -m src.models.run_ab_experiment            # All 3 models (~15 min)
 
 ## Bughunt Status
 
-See [`BUGHUNT.md`](BUGHUNT.md) for the full list of 43 bugs found 2026-03-09. Current status:
+See [`BUGHUNT.md`](docs/development/BUGHUNT.md) for the full list of 43 bugs found 2026-03-09. Current status:
 - **All HIGH bugs resolved** (H1–H15). H4 was a false positive (algebraically correct formula).
 - **CRITICAL bugs resolved** (C1 test gap remains at MEDIUM priority, C2 fully tested).
-- MEDIUM/LOW bugs remain open — see BUGHUNT.md for details.
+- MEDIUM/LOW bugs remain open — see docs/development/BUGHUNT.md for details.

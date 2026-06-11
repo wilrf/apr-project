@@ -1,13 +1,13 @@
 # tests/data/test_verify_data.py
 """Tests for data verification module."""
 
-import pytest
-import pandas as pd
 from pathlib import Path
-from unittest.mock import patch, MagicMock
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
-from src.data.verify_data import verify_data_coverage, _write_data_readme
+import pandas as pd
+
+from src.data.verify_data import _write_data_readme, verify_data_coverage
 
 
 class TestVerifyDataCoverage:

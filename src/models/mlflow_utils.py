@@ -1,9 +1,10 @@
 """MLflow integration utilities for experiment tracking."""
 
 from __future__ import annotations
+
 import logging
-from typing import Dict, Any, Optional
 from pathlib import Path
+from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +20,11 @@ class MLflowTracker:
         tracking_uri: Optional[str] = None,
     ):
         self.experiment_name, self.run_name = experiment_name, run_name
-        self._run, self._mlflow = None, None
+        # mlflow is an optional, untyped dependency loaded lazily below. Typing
+        # the handles as Any (the runtime _active() guard gates real calls)
+        # avoids spurious Optional-attribute errors on a dynamic module object.
+        self._run: Any = None
+        self._mlflow: Any = None
         self.enabled = enabled
         if enabled:
             try:

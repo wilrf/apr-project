@@ -166,7 +166,9 @@ def run_quick_ab(train_df) -> Dict[str, QuickResult]:
         )
         print(f"{'='*60}")
 
-        all_lr_probs, all_xgb_probs, all_y = [], [], []
+        all_lr_probs: List[float] = []
+        all_xgb_probs: List[float] = []
+        all_y: List[float] = []
 
         for fold_idx, (train_idx, val_idx) in enumerate(cv.split(train_df)):
             fold_train = train_df.iloc[train_idx]
@@ -215,7 +217,9 @@ def run_quick_ab(train_df) -> Dict[str, QuickResult]:
             C=0.1, penalty="l1", solver="saga", random_state=42
         )
         lr_final.fit(train_df[config.feature_cols], train_df["upset"])
-        lr_coefs = lr_final.model.coef_[0] if hasattr(lr_final, "model") else None
+        # model is set by fit() above; the None check also narrows the Optional
+        # for the type checker (hasattr was always true since model is an attr).
+        lr_coefs = lr_final.model.coef_[0] if lr_final.model is not None else None
 
         results[config.name] = QuickResult(
             config=config,
@@ -273,9 +277,7 @@ def print_quick_comparison(results: Dict[str, QuickResult]):
         lr_auc = r.lr_metrics["auc_roc"]
         xgb_auc = r.xgb_metrics["auc_roc"]
         winner = _pick_auc_winner(lr_auc, xgb_auc)
-        outcome = (
-            f"{winner} wins" if winner != "N/A" else "no defined winner"
-        )
+        outcome = f"{winner} wins" if winner != "N/A" else "no defined winner"
         print(
             f"  {label}: LR={_format_auc(lr_auc)}, "
             f"XGB={_format_auc(xgb_auc)} -> {outcome}"
@@ -378,9 +380,7 @@ def print_full_comparison(results: Dict[str, UnifiedCVResults]):
             k: r.aggregated_metrics[k]["auc_roc_mean"] for k in ["lr", "xgb", "lstm"]
         }
         ranked = _rank_models_by_auc(aucs)
-        ranking_str = " > ".join(
-            f"{k.upper()}({_format_auc(v)})" for k, v in ranked
-        )
+        ranking_str = " > ".join(f"{k.upper()}({_format_auc(v)})" for k, v in ranked)
         print(f"  {label}: {ranking_str}")
 
     # Correlation matrices

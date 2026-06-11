@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+from typing import Optional, Tuple
+
+import numpy as np
 import torch
 import torch.nn as nn
-import numpy as np
 from torch.utils.data import Dataset
-from typing import Optional, Tuple
 
 
 class SiameseLSTMDataset(Dataset):

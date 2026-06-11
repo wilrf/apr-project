@@ -6,7 +6,7 @@
 
 Two decades of research on NFL upset prediction have produced consistently modest accuracy gains, suggesting that the barrier to understanding upsets may be structural rather than methodological. Rather than attempt another incremental improvement, we use the *structure of prediction failure* as a lens for understanding why upsets happen. We train three architecturally distinct models — L1-regularized logistic regression, gradient-boosted trees (XGBoost), and a siamese LSTM with attention — on identical data in architecture-appropriate representations, then analyze their patterns of agreement and disagreement as a diagnostic tool. Each model processes the same underlying game data in a different form: LR receives 46 pre-computed summary statistics, XGBoost receives 70 features including per-game lags, and the LSTM receives raw 8-game sequences of 14 features per timestep plus 10 matchup context features. This is not a model competition — it is a diagnostic framework where the disagreement itself is the finding.
 
-On 3,495 training games (2005–2022) evaluated via 6-fold expanding-window cross-validation, the three models achieve statistically indistinguishable performance (AUC-ROC: LR 0.650, LSTM 0.641, XGB 0.638; bootstrap CIs on all pairwise differences contain zero). Stratifying the disagreement analysis by point spread reveals that the LSTM's exclusive contribution inverts with matchup context: at small spreads (3–6.5 points), 92% of LSTM exclusives are false-alarm rejections; at medium spreads (7–13.5), 83% are genuine upset detections. A spread ablation experiment shows that all models significantly degrade without betting-line features, with the LSTM retaining the most signal (AUC 0.574 vs. 0.571 and 0.566). On a held-out test set of 558 games (2023–2025), the LSTM shows the largest generalization gap (AUC: 0.641 → 0.524), and an LSTM veto ensemble that improves predictions in CV fails to transfer forward, indicating temporal patterns are real but non-stationary.
+On 3,495 training games (2005–2022) evaluated via 6-fold expanding-window cross-validation, the three models achieve statistically indistinguishable performance (AUC-ROC: LR 0.650, XGB 0.638, LSTM 0.637; bootstrap CIs on all pairwise differences contain zero). Stratifying the disagreement analysis by point spread reveals that the LSTM's exclusive contribution inverts with matchup context: at small spreads (3–6.5 points), 92% of LSTM exclusives are false-alarm rejections; at medium spreads (7–13.5), 83% are genuine upset detections. A spread ablation experiment shows that all models significantly degrade without betting-line features, compressing them into a near-tie (AUC: LR 0.571, LSTM 0.568, XGB 0.566) in which the LSTM degrades least in point estimate but does not overtake LR. On a held-out test set of 558 games (2023–2025), the LSTM shows the largest generalization gap (AUC: 0.637 → 0.526), and an LSTM veto ensemble that improves predictions in CV fails to transfer forward, indicating temporal patterns are real but non-stationary.
 
 These findings support a two-dimensional upset taxonomy — model agreement crossed with matchup context — that decomposes prediction failure into stochastic variance (close games), temporal dynamics (moderate underdogs), and information limits (large mismatches). The central contribution is methodological: architectural disagreement reveals the structure behind upsets in a way that no single model or flat ensemble can, and the diagnostic framework generalizes to any prediction domain where outcomes are driven by heterogeneous mechanisms.
 
@@ -110,12 +110,12 @@ Table 1 presents the 6-fold cross-validation results on 1,162 predictions (valid
 | Model | AUC-ROC | Brier Score | Log Loss |
 |-------|---------|-------------|----------|
 | LR | 0.650 | 0.197 | 0.581 |
-| LSTM | 0.641 | 0.199 | 0.583 |
-| XGB | 0.638 | 0.199 | 0.586 |
+| XGB | 0.638 | 0.199 | 0.585 |
+| LSTM | 0.637 | 0.200 | 0.586 |
 
-All three models achieve comparable performance. The difference between the best (LR, 0.650) and worst (XGB, 0.638) is 0.012 AUC. Bootstrap 95% confidence intervals on pairwise AUC differences confirm the models are statistically indistinguishable: LR-XGB +0.012 [-0.007, +0.031], LR-LSTM +0.009 [-0.014, +0.033], XGB-LSTM -0.003 [-0.030, +0.024]. All intervals contain zero. The LSTM performs on par with XGBoost, contrary to the general finding that tree-based models dominate deep learning on tabular data (Grinsztajn et al., 2022) — though our LSTM receives sequential data rather than a tabular representation, which is its structural advantage. The statistical equivalence of the three models is important for the disagreement framework: if one model were significantly weaker, its disagreement would simply indicate error rather than a different perspective on the data.
+All three models achieve comparable performance. The difference between the best (LR, 0.650) and worst (LSTM, 0.637) is 0.013 AUC. Bootstrap 95% confidence intervals on pairwise AUC differences confirm the models are statistically indistinguishable: LR-XGB +0.012 [-0.007, +0.031], LR-LSTM +0.012 [-0.012, +0.037], XGB-LSTM +0.001 [-0.028, +0.028]. All intervals contain zero. The LSTM performs on par with XGBoost, contrary to the general finding that tree-based models dominate deep learning on tabular data (Grinsztajn et al., 2022) — though our LSTM receives sequential data rather than a tabular representation, which is its structural advantage. The statistical equivalence of the three models is important for the disagreement framework: if one model were significantly weaker, its disagreement would simply indicate error rather than a different perspective on the data.
 
-The probability correlations reveal the structural relationships between models. LR and XGB correlate at 0.874, indicating they largely extract the same signal from overlapping feature sets. The LSTM correlates moderately with both (LR: 0.784, XGB: 0.699), confirming it captures partially distinct information despite receiving the same underlying data. The XGB-LSTM correlation (0.699) is the lowest pairwise value, reflecting the greatest structural distance between interaction-based and sequence-based processing.
+The probability correlations reveal the structural relationships between models. LR and XGB correlate at 0.874, indicating they largely extract the same signal from overlapping feature sets. The LSTM correlates moderately with both (LR: 0.764, XGB: 0.674), confirming it captures partially distinct information despite receiving the same underlying data. The XGB-LSTM correlation (0.674) is the lowest pairwise value, reflecting the greatest structural distance between interaction-based and sequence-based processing.
 
 ### 3.2 Held-Out Test Performance
 
@@ -125,9 +125,9 @@ Table 2 presents results on the 558-game test set (2023–2025), with Platt-cali
 
 | Model | AUC-ROC | Brier Score | Log Loss |
 |-------|---------|-------------|----------|
-| XGB | 0.576 | 0.201 | 0.592 |
+| XGB | 0.576 | 0.201 | 0.591 |
 | LR | 0.562 | 0.203 | 0.594 |
-| LSTM | 0.524 | 0.208 | 0.606 |
+| LSTM | 0.526 | 0.209 | 0.608 |
 | *Baseline* | — | *0.204* | — |
 
 XGBoost is the best test-set model, consistent with the general finding favoring tree-based methods on tabular-adjacent tasks. All AUCs are modest, confirming that NFL upsets remain genuinely difficult to predict.
@@ -138,11 +138,11 @@ XGBoost is the best test-set model, consistent with the general finding favoring
 |-------|--------|----------|-----|
 | LR | 0.650 | 0.562 | -0.088 |
 | XGB | 0.638 | 0.576 | -0.062 |
-| LSTM | 0.641 | 0.524 | -0.117 |
+| LSTM | 0.637 | 0.526 | -0.111 |
 
-All models degrade from CV to test, which is expected when validating on a future time period rather than on held-out folds within the training range. XGBoost shows the smallest gap (-0.062), indicating that non-linear interaction patterns are the most temporally stable signal. The LSTM shows the largest gap (-0.117), still substantially larger than XGBoost's, suggesting that the temporal patterns it learns from 2005–2022 sequences do not fully transfer to 2023–2025.
+All models degrade from CV to test, which is expected when validating on a future time period rather than on held-out folds within the training range. XGBoost shows the smallest gap (-0.062), indicating that non-linear interaction patterns are the most temporally stable signal. The LSTM shows the largest gap (-0.111), still substantially larger than XGBoost's, suggesting that the temporal patterns it learns from 2005–2022 sequences do not fully transfer to 2023–2025.
 
-The inter-model correlation structure also shifts materially. The LR-XGB correlation remains stable (0.874 CV → 0.878 test), but the LSTM's correlation with both static models drops substantially (LR: 0.784 → 0.429; XGB: 0.699 → 0.408). The LSTM diverges from the other models more in truly out-of-sample data than in cross-validation, indicating that its temporal encoding captures patterns that are less stable forward in time than the features available to LR and XGB.
+The inter-model correlation structure also shifts materially. The LR-XGB correlation remains stable (0.874 CV → 0.878 test), but the LSTM's correlation with both static models drops substantially (LR: 0.764 → 0.373; XGB: 0.674 → 0.309). The LSTM diverges from the other models more in truly out-of-sample data than in cross-validation, indicating that its temporal encoding captures patterns that are less stable forward in time than the features available to LR and XGB.
 
 The per-season breakdown further illuminates LSTM instability:
 
@@ -150,11 +150,11 @@ The per-season breakdown further illuminates LSTM instability:
 
 | Season | Games | Upset Rate | LR | XGB | LSTM |
 |--------|-------|-----------|------|------|------|
-| 2023 | 185 | 29.7% | 0.512 | 0.521 | 0.469 |
-| 2024 | 192 | 23.4% | 0.552 | 0.554 | 0.549 |
-| 2025 | 181 | 32.6% | 0.617 | 0.639 | 0.556 |
+| 2023 | 185 | 29.7% | 0.512 | 0.521 | 0.443 |
+| 2024 | 192 | 23.4% | 0.552 | 0.554 | 0.534 |
+| 2025 | 181 | 32.6% | 0.617 | 0.639 | 0.592 |
 
-The LSTM trails the static models in all three held-out seasons. Its weakest performance comes in 2023 (AUC 0.469), and although it improves through 2025 (0.556), it remains below both LR and XGB throughout. This pattern is more consistent with a persistent forward-transfer problem than with a single anomalous season.
+The LSTM trails the static models in all three held-out seasons. Its weakest performance comes in 2023 (AUC 0.443), and although it improves through 2025 (0.592), it remains below both LR and XGB throughout. This pattern is more consistent with a persistent forward-transfer problem than with a single anomalous season.
 
 ### 3.3 Spread Ablation
 
@@ -166,15 +166,15 @@ Table 5 presents the effect of removing betting-line features on cross-validatio
 |-------|-------------|----------------|-------|
 | LR | 0.650 | 0.571 | -0.079 |
 | XGB | 0.638 | 0.566 | -0.072 |
-| LSTM | 0.641 | 0.574 | -0.067 |
+| LSTM | 0.637 | 0.568 | -0.067 |
 
 Removing spread information hurts all three models substantially. Bootstrap confidence intervals confirm all three deltas are statistically significant: LR -0.079 [-0.108, -0.050], XGB -0.072 [-0.101, -0.042], LSTM -0.067 [-0.098, -0.036]. The betting line contains significant predictive information beyond what team performance statistics capture.
 
-The LSTM degrades least in point estimate (-0.067) and becomes the strongest model in the no-spread condition (0.574 vs. 0.571 for LR and 0.566 for XGB). However, the difference in degradation between LSTM and LR is not statistically significant: the bootstrap CI on the delta-of-deltas is +0.012 [-0.019, +0.044], which contains zero. We can state that the LSTM retains more signal without spread than the other models, but we cannot claim this difference is robust to sampling variation. The ranking reversal is suggestive evidence that the LSTM captures temporal signal partially independent of the market, not a statistically proven finding.
+The LSTM degrades least in point estimate (-0.067) and overtakes XGBoost in the no-spread condition (0.568 vs. 0.571 for LR and 0.566 for XGB), but it does not become the strongest model — LR remains on top. The difference in degradation between LSTM and LR is not statistically significant: the bootstrap CI on the delta-of-deltas is +0.012 [-0.019, +0.044], which contains zero. We can state that the LSTM retains more signal without spread than XGBoost, but we cannot claim this difference is robust to sampling variation. The compression of the three models into a near-tie is suggestive evidence that the LSTM captures temporal signal partially independent of the market, not a statistically proven finding.
 
-The correlation structure shifts substantially without spread. The LR-XGB correlation drops from 0.874 to 0.742, and the XGB-LSTM correlation drops from 0.699 to 0.419. The spread acts as a shared anchor that pulls model predictions together; without it, the models diversify and their architectural differences become more pronounced.
+The correlation structure shifts substantially without spread. The LR-XGB correlation drops from 0.874 to 0.742, and the XGB-LSTM correlation drops from 0.674 to 0.372. The spread acts as a shared anchor that pulls model predictions together; without it, the models diversify and their architectural differences become more pronounced.
 
-This diversification is reflected in the disagreement statistics. The all-three agreement rate drops from 74.7% to 55.3%, and LSTM-exclusive correct predictions double from 5.6% to 11.0% of games. Within these LSTM exclusives, the number of upsets correctly caught increases from 12 to 33, suggesting that the spread was masking some genuine temporal signal that the static models were capturing through the betting line rather than through team performance trajectories.
+This diversification is reflected in the disagreement statistics. The all-three agreement rate drops from 74.7% to 55.3%, and LSTM-exclusive correct predictions nearly double from 6.2% to 10.8% of games. Within these LSTM exclusives, the number of upsets correctly caught increases from 15 to 44, suggesting that the spread was masking some genuine temporal signal that the static models were capturing through the betting line rather than through team performance trajectories.
 
 ### 3.4 Disagreement Analysis
 
@@ -184,24 +184,24 @@ With three statistically equivalent models producing moderately correlated predi
 
 | Category | N | % | Upset Rate | Avg P(upset): LR | XGB | LSTM |
 |----------|---|---|------------|---------|-----|------|
-| all_correct | 528 | 45.4 | 36.7 | 0.259 | 0.265 | 0.259 |
-| all_wrong | 340 | 29.3 | 20.9 | 0.349 | 0.351 | 0.343 |
-| only_lr | 28 | 2.4 | 28.6 | 0.292 | 0.317 | 0.315 |
-| only_xgb | 48 | 4.1 | 25.0 | 0.317 | 0.290 | 0.333 |
-| only_lstm | 65 | 5.6 | 18.5 | 0.328 | 0.343 | 0.249 |
-| lr_xgb | 78 | 6.7 | 29.5 | 0.289 | 0.279 | 0.307 |
-| lr_lstm | 48 | 4.1 | 33.3 | 0.290 | 0.311 | 0.277 |
-| xgb_lstm | 27 | 2.3 | 33.3 | 0.311 | 0.286 | 0.261 |
+| all_correct | 528 | 45.4 | 37.1 | 0.259 | 0.265 | 0.258 |
+| all_wrong | 333 | 28.7 | 20.4 | 0.350 | 0.351 | 0.353 |
+| only_lr | 31 | 2.7 | 22.6 | 0.292 | 0.320 | 0.320 |
+| only_xgb | 48 | 4.1 | 22.9 | 0.317 | 0.286 | 0.344 |
+| only_lstm | 72 | 6.2 | 20.8 | 0.326 | 0.345 | 0.236 |
+| lr_xgb | 78 | 6.7 | 26.9 | 0.285 | 0.275 | 0.307 |
+| lr_lstm | 45 | 3.9 | 37.8 | 0.290 | 0.308 | 0.281 |
+| xgb_lstm | 27 | 2.3 | 37.0 | 0.311 | 0.292 | 0.257 |
 
 Several patterns emerge.
 
-**The agreement core.** Nearly half of all games (45.4%) fall into the all_correct category, where all three models' binary predictions match the outcome. These games have a 36.7% upset rate — above the 29.7% base rate — and tend to be games where the signal is strong enough for any reasonable model to detect. Another 29.3% are all_wrong: games where no model captures the outcome. Together, these two categories account for 74.7% of games, leaving 25.3% where the models disagree in an informative way.
+**The agreement core.** Nearly half of all games (45.4%) fall into the all_correct category, where all three models' binary predictions match the outcome. These games have a 37.1% upset rate — above the 29.7% base rate — and tend to be games where the signal is strong enough for any reasonable model to detect. Another 28.7% are all_wrong: games where no model captures the outcome. Together, these two categories account for 74.1% of games, leaving 25.9% where the models disagree in an informative way.
 
-**Exclusive categories are small but diagnostic.** The only_lr (2.4%), only_xgb (4.1%), and only_lstm (5.6%) categories are each a small fraction of games, but their structure reveals the unique contribution of each architecture. The lr_xgb category (6.7%) identifies games where the static models agree but the LSTM disagrees — the largest pairwise-agreement category and a natural indicator of non-temporal signal.
+**Exclusive categories are small but diagnostic.** The only_lr (2.7%), only_xgb (4.1%), and only_lstm (6.2%) categories are each a small fraction of games, but their structure reveals the unique contribution of each architecture. The lr_xgb category (6.7%) identifies games where the static models agree but the LSTM disagrees — the largest pairwise-agreement category and a natural indicator of non-temporal signal.
 
-**LSTM exclusives are primarily non-upset rejections.** Of the 65 games where only the LSTM is correct, 53 (81.5%) are non-upsets that the LSTM correctly rejects while LR and XGB incorrectly predict upset. Only 12 (18.5%) are upsets that the LSTM catches and the other models miss. A one-sided binomial test confirms that this bias is statistically significant: the LSTM exclusive upset rate of 18.5% is below the base rate of 29.7% at p = 0.029. The LSTM's primary exclusive contribution is *moderating false alarms* from the static models, not detecting temporal upsets that the others miss.
+**LSTM exclusives are primarily non-upset rejections.** Of the 72 games where only the LSTM is correct, 57 (79.2%) are non-upsets that the LSTM correctly rejects while LR and XGB incorrectly predict upset. Only 15 (20.8%) are upsets that the LSTM catches and the other models miss. A one-sided binomial test shows this bias is directional but not statistically significant: the LSTM exclusive upset rate of 20.8% is below the base rate of 29.7% at p = 0.061. The LSTM's primary exclusive contribution is *moderating false alarms* from the static models, not detecting temporal upsets that the others miss.
 
-The average predicted probabilities in the only_lstm category illuminate the mechanism. For these games, LR (0.328) and XGB (0.343) both assign above-threshold probabilities, while the LSTM assigns a lower probability (0.249). The LSTM's temporal encoding provides evidence that these games, which look like upset candidates based on static features, are not actually likely to produce upsets — perhaps because the underdog's recent form trajectory contradicts the static picture.
+The average predicted probabilities in the only_lstm category illuminate the mechanism. For these games, LR (0.326) and XGB (0.345) both assign above-threshold probabilities, while the LSTM assigns a lower probability (0.236). The LSTM's temporal encoding provides evidence that these games, which look like upset candidates based on static features, are not actually likely to produce upsets — perhaps because the underdog's recent form trajectory contradicts the static picture.
 
 ### 3.5 Spread-Stratified Disagreement
 
@@ -267,11 +267,11 @@ The disagreement framework, crossed with matchup context, reveals four structura
 
 **Type 1: Consensus Signal (all_correct, 45.4% of games).** Games where all three architectures correctly predict the outcome. At small spreads (3–6.5), only 30.7% of games reach consensus; at large spreads (14+), 90.0% do. The consensus signal strengthens with spread magnitude because large-spread games are more deterministic — the favorite usually wins — and all models capture this easily. The more interesting consensus cases are at small spreads, where models agree on an upset call and are right 91.2% of the time. These represent the small subset of close games where linear mispricing, interaction effects, and temporal patterns all converge.
 
-**Type 2: Temporal Signal (only_lstm, 5.6% overall).** The LSTM's exclusive contribution has a dual character that depends on the spread regime. At small spreads (60 of 65 LSTM exclusives), the LSTM almost exclusively *moderates false alarms*: 92% of its exclusive correct predictions are non-upsets that LR and XGB incorrectly flag. The LSTM's trajectory reading says "despite what the summary statistics suggest, this underdog's recent form doesn't support an upset." At medium spreads (12 of 65 LSTM exclusives), the pattern inverts: 83% are *genuine upset detections* that the static models miss. Here the LSTM identifies meaningful underdogs — teams with momentum or trajectory that static features cannot capture.
+**Type 2: Temporal Signal (only_lstm, 6.2% overall).** The LSTM's exclusive contribution has a dual character that depends on the spread regime. At small spreads (60 of 72 LSTM exclusives), the LSTM almost exclusively *moderates false alarms*: 92% of its exclusive correct predictions are non-upsets that LR and XGB incorrectly flag. The LSTM's trajectory reading says "despite what the summary statistics suggest, this underdog's recent form doesn't support an upset." At medium spreads (12 of 72 LSTM exclusives), the pattern inverts: 83% are *genuine upset detections* that the static models miss. Here the LSTM identifies meaningful underdogs — teams with momentum or trajectory that static features cannot capture.
 
 This inversion is the taxonomy's most diagnostic finding — and the strongest evidence that disagreement reveals structure rather than noise. The LSTM is not one instrument but two: a false-alarm filter and an upset detector. The spread context determines which role it plays. At small spreads, games are inherently noisy and models over-predict; the LSTM provides corrective temporal evidence ("the trajectory doesn't support this upset"). At medium spreads, games should be more deterministic, so when the LSTM uniquely predicts an upset, it is detecting genuine signal — team momentum or trajectory — that the static models' representations cannot encode. This context-dependent dual role would be invisible to any single-model analysis or flat model comparison; it is visible only because the disagreement framework allows us to ask *which model succeeds, and in what matchup context*.
 
-The doubling of LSTM exclusives without spread (5.6% → 11.0%) indicates that approximately half of the LSTM's unique temporal information overlaps with what the betting line encodes. Within these additional exclusives, upsets caught increase from 12 to 33, suggesting the spread was masking genuine temporal signal.
+The near-doubling of LSTM exclusives without spread (6.2% → 10.8%) indicates that approximately half of the LSTM's unique temporal information overlaps with what the betting line encodes. Within these additional exclusives, upsets caught increase from 15 to 44, suggesting the spread was masking genuine temporal signal.
 
 **Type 3: Hidden Information (all_wrong at medium/large spreads).** The spread stratification cleanly separates this type. At medium spreads, the all_wrong category is 96% missed upsets (54 of 56 games) — genuine surprises where the favorite should have won comfortably but didn't. At large spreads, it is 100% missed upsets (6 of 6). These are driven by information outside our feature set: injuries announced after the line was set, motivational context (playoff elimination, rivalry intensity), weather surprises, or teams resting starters. These are not modeling failures — they are data availability boundaries. No feature engineering on historical game statistics can capture a game-day quarterback injury.
 
@@ -281,7 +281,7 @@ The spread stratification thus transforms the flat all_wrong category (29.3% of 
 
 ### 4.2 The LSTM Paradox: Competitive but Non-Stationary
 
-The most striking finding in our results is the contrast between the LSTM's cross-validation performance (AUC 0.641, competitive with LR and XGB) and its test-set performance (AUC 0.524, substantially worse). This 0.117 AUC gap, still much larger than XGBoost's gap of 0.062, demands explanation.
+The most striking finding in our results is the contrast between the LSTM's cross-validation performance (AUC 0.637, competitive with LR and XGB) and its test-set performance (AUC 0.526, substantially worse). This 0.111 AUC gap, still much larger than XGBoost's gap of 0.062, demands explanation.
 
 Three hypotheses merit consideration:
 
@@ -289,9 +289,9 @@ Three hypotheses merit consideration:
 
 **Overfitting to sequence artifacts.** Despite dropout regularization and validation-based early stopping during cross-validation, the LSTM has substantially more parameters than LR or XGBoost and operates on a richer input space (8 × 14 sequence + 10 context vs. 46 or 70 scalar features). With only 3,495 training games, the LSTM may learn spurious temporal correlations that don't persist.
 
-**Persistent forward-transfer fragility.** The per-season test results sharpen this interpretation. The LSTM trails LR and XGB in all three held-out seasons: 0.469 in 2023, 0.549 in 2024, and 0.556 in 2025. The problem is therefore not confined to one anomalous future season. Rather, the sequence-derived signal appears less portable than the static representations across the entire 2023–2025 horizon.
+**Persistent forward-transfer fragility.** The per-season test results sharpen this interpretation. The LSTM trails LR and XGB in all three held-out seasons: 0.443 in 2023, 0.534 in 2024, and 0.592 in 2025. The problem is therefore not confined to one anomalous future season. Rather, the sequence-derived signal appears less portable than the static representations across the entire 2023–2025 horizon.
 
-The correlation evidence reinforces this diagnosis. In CV, the LSTM correlates moderately with LR (0.784) and XGB (0.699). On the test set, these correlations drop to 0.429 and 0.408. The LSTM still diverges meaningfully from the other models in truly out-of-sample data, suggesting it is responding to temporal features that the other models cannot see — but that these features are less reliable in the forward direction.
+The correlation evidence reinforces this diagnosis. In CV, the LSTM correlates moderately with LR (0.764) and XGB (0.674). On the test set, these correlations drop to 0.373 and 0.309. The LSTM still diverges meaningfully from the other models in truly out-of-sample data, suggesting it is responding to temporal features that the other models cannot see — but that these features are less reliable in the forward direction.
 
 ### 4.3 What the Market Encodes
 
@@ -299,9 +299,9 @@ The spread ablation experiment provides a clean decomposition of what each model
 
 The spread magnitude is LR's dominant feature (standardized coefficient -0.539, more than 5x any other feature), confirming that logistic regression in this setting is primarily a spread-mispricing detector. When spread is removed, LR drops from 0.650 to 0.571 AUC — a 12% relative decline — and must rely on less informative features like success rate differential (0.054), turnover margin (-0.069), and environmental variables.
 
-XGBoost's degradation (-0.072) is slightly less than LR's (-0.079), suggesting its tree-based interactions extract some value from feature combinations that partially compensate for the missing spread signal. The LSTM's degradation is the smallest (-0.067), and critically, the LSTM *becomes the strongest model* in the no-spread condition (0.574 vs. 0.571 and 0.566). This ranking reversal is robust evidence that the LSTM captures genuine predictive signal from team performance trajectories that is partially independent of the market's assessment.
+XGBoost's degradation (-0.072) is slightly less than LR's (-0.079), suggesting its tree-based interactions extract some value from feature combinations that partially compensate for the missing spread signal. The LSTM's degradation is the smallest (-0.067), and the LSTM *overtakes XGBoost* in the no-spread condition (0.568 vs. 0.566), though it does not surpass LR (0.571). This compression into a near-tie is suggestive — not statistically robust — evidence that the LSTM captures genuine predictive signal from team performance trajectories that is partially independent of the market's assessment.
 
-The correlation structure tells the same story from a different angle. With spread, the LR-XGB correlation is 0.874 — the spread acts as a powerful shared anchor pulling both models toward similar predictions. Without spread, this drops to 0.742. The XGB-LSTM correlation drops even further (0.699 → 0.419), indicating that the spread was the primary channel through which XGBoost and the LSTM made similar predictions. Remove it, and they are processing fundamentally different information. This diversification is itself diagnostic: the spread masks the architectural differences that reveal the structure behind upsets. When the shared anchor is removed, the three models scatter — and their disagreement patterns become more informative about the distinct mechanisms each architecture captures.
+The correlation structure tells the same story from a different angle. With spread, the LR-XGB correlation is 0.874 — the spread acts as a powerful shared anchor pulling both models toward similar predictions. Without spread, this drops to 0.742. The XGB-LSTM correlation drops even further (0.674 → 0.372), indicating that the spread was the primary channel through which XGBoost and the LSTM made similar predictions. Remove it, and they are processing fundamentally different information. This diversification is itself diagnostic: the spread masks the architectural differences that reveal the structure behind upsets. When the shared anchor is removed, the three models scatter — and their disagreement patterns become more informative about the distinct mechanisms each architecture captures.
 
 ### 4.4 Implications
 
@@ -319,9 +319,9 @@ However, on the held-out test set, the LSTM veto fails: among the 92 veto opport
 
 Several limitations bound the claims of this work.
 
-**Statistical power of exclusive categories.** Although the LSTM exclusive non-upset rejection bias is statistically significant (p = 0.029), the spread-stratified decomposition produces small cell sizes — particularly the 12 medium-spread LSTM exclusives where 10 are upset detections. This inversion pattern is striking but rests on a small sample that limits formal significance testing within spread strata. Similarly, the LSTM's smaller ablation delta is a point estimate that does not reach statistical significance (CI contains zero). We are careful to distinguish between statistically proven findings and suggestive patterns throughout.
+**Statistical power of exclusive categories.** The LSTM exclusive non-upset rejection bias is directional but does not reach statistical significance (one-sided binomial p = 0.061), and the spread-stratified decomposition produces small cell sizes — particularly the 12 medium-spread LSTM exclusives where 10 are upset detections. This inversion pattern is striking but rests on a small sample that limits formal significance testing within spread strata. Similarly, the LSTM's smaller ablation delta is a point estimate that does not reach statistical significance (CI contains zero). We are careful to distinguish between statistically proven findings and suggestive patterns throughout.
 
-**Calibration and disagreement interact.** The test set uses Platt-calibrated probabilities, which compress the probability range from [0.00, 0.72] (CV, raw) to roughly [0.19, 0.51] (test, calibrated). This compression means about 71% of test predictions exceed the base-rate threshold, compared to 53% in CV, inflating threshold-based disagreement categories. We verified that the LSTM correlation drop from CV (0.78/0.70) to test (0.43/0.41) is genuine — correlations are computed on continuous probabilities and are unaffected by calibration compression. The primary disagreement analyses are reported on uncalibrated CV predictions, with rank-based (top-K) analysis used for the test set where calibration artifacts are less relevant.
+**Calibration and disagreement interact.** The test set uses Platt-calibrated probabilities, which compress the probability range from [0.00, 0.72] (CV, raw) to roughly [0.19, 0.51] (test, calibrated). This compression means about 71% of test predictions exceed the base-rate threshold, compared to 53% in CV, inflating threshold-based disagreement categories. We verified that the LSTM correlation drop from CV (0.76/0.67) to test (0.37/0.31) is genuine — correlations are computed on continuous probabilities and are unaffected by calibration compression. The primary disagreement analyses are reported on uncalibrated CV predictions, with rank-based (top-K) analysis used for the test set where calibration artifacts are less relevant.
 
 **Sample size.** The 558-game test set and 3,495-game training set are modest by machine learning standards. NFL produces approximately 270 games per season, and our 21-season training window may not capture the full range of temporal dynamics. The per-season test results (Table 4) are based on 181–192 games each, limiting the reliability of season-specific conclusions.
 
@@ -341,7 +341,7 @@ First, the three models are statistically indistinguishable in cross-validation 
 
 Second, the LSTM captures temporal signal that is partially independent of the betting market and whose character depends on matchup context. At small spreads, the LSTM's exclusive contribution is false-alarm moderation (92% of exclusives are non-upset rejections). At medium spreads, it inverts to upset detection (83% are genuine catches). This dual role — and its dependence on spread regime — is the taxonomy's most diagnostic finding, and it is invisible to any single-model analysis.
 
-Third, temporal patterns are real but non-stationary. The LSTM improves the three-model ensemble in cross-validation (AUC 0.655 vs. 0.649 for LR+XGB alone), but this improvement does not transfer to the held-out test set, where XGB alone (0.576) outperforms all ensemble strategies. The LSTM's CV-to-test gap (-0.117) remains much larger than XGBoost's (-0.062), and its correlation with the static models falls from roughly 0.78/0.70 in CV to 0.43/0.41 on test. Temporal dynamics in NFL performance appear to be more era-specific than static feature relationships.
+Third, temporal patterns are real but non-stationary. The LSTM improves the three-model ensemble in cross-validation (AUC 0.655 vs. 0.649 for LR+XGB alone), but this improvement does not transfer to the held-out test set, where XGB alone (0.576) outperforms all ensemble strategies. The LSTM's CV-to-test gap (-0.111) remains much larger than XGBoost's (-0.062), and its correlation with the static models falls from roughly 0.76/0.67 in CV to 0.37/0.31 on test. Temporal dynamics in NFL performance appear to be more era-specific than static feature relationships.
 
 Fourth, the spread-stratified taxonomy decomposes prediction failure into distinct mechanisms: stochastic variance dominates at small spreads (97% of all_wrong games are false alarms in close matchups), while hidden information dominates at medium and large spreads (96–100% are missed upsets driven by unobserved factors). This two-dimensional structure — model agreement crossed with matchup context — characterizes both the mechanisms and the boundaries of prediction more precisely than either dimension alone.
 
