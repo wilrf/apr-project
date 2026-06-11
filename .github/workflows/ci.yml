@@ -20,12 +20,12 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
-      - name: Install (dev + lstm)
-        run: pip install -e ".[dev,lstm]"
+      - name: Install (dev + lstm + dashboard)
+        run: pip install -e ".[dev,lstm,dashboard]"
       - name: Ruff
-        run: python -m ruff check src/ tests/
+        run: python -m ruff check src/ tests/ dashboard/backend/
       - name: Black
-        run: black --check src/ tests/
+        run: black --check src/ tests/ dashboard/backend/
       - name: Mypy
         run: python -m mypy
       - name: Fast tests
@@ -41,7 +41,7 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
-      - name: Install (dev + lstm)
-        run: pip install -e ".[dev,lstm]"
+      - name: Install (dev + lstm + dashboard)
+        run: pip install -e ".[dev,lstm,dashboard]"
       - name: LSTM tests
         run: python -m pytest tests/models/test_lstm_model.py tests/models/test_lstm_trainer.py -q

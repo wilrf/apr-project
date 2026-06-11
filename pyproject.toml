@@ -26,7 +26,7 @@ dependencies = [
 
 [project.optional-dependencies]
 lstm = ["torch==2.8.0"]
-dashboard = ["fastapi>=0.110.0", "uvicorn>=0.29.0"]
+dashboard = ["fastapi==0.128.8", "uvicorn==0.39.0"]
 # Dev tooling is pinned to exact versions for reproducibility: linters,
 # formatters, and the type checker produce version-dependent output, so an
 # unpinned range lets a fresh CI install drift from local and break the gate
@@ -39,6 +39,7 @@ dev = [
     "ruff==0.15.16",
     "mypy==1.19.1",
     "pre-commit==4.3.0",
+    "httpx==0.28.1",
 ]
 
 [build-system]
@@ -71,7 +72,7 @@ ignore_missing_imports = true
 warn_unused_ignores = true
 warn_redundant_casts = true
 no_implicit_optional = true
-files = ["src"]
+files = ["src", "dashboard/backend"]
 # Pragmatic start: do not require full annotations yet.
 disallow_untyped_defs = false
 check_untyped_defs = false

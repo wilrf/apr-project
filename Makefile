@@ -3,8 +3,8 @@
 help:  ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
 
-install:  ## Create venv and install deps (incl. lstm + dev)
-	python3 -m venv .venv && . .venv/bin/activate && pip install -e ".[dev,lstm]"
+install:  ## Create venv and install deps (incl. lstm + dev + dashboard)
+	python3 -m venv .venv && . .venv/bin/activate && pip install -e ".[dev,lstm,dashboard]"
 
 test:  ## Fast test suite (excludes slow LSTM model/trainer tests)
 	python3 -m pytest tests/ --ignore=tests/models/test_lstm_model.py --ignore=tests/models/test_lstm_trainer.py -q
@@ -13,10 +13,10 @@ test-all:  ## Full test suite including slow LSTM tests
 	python3 -m pytest tests/ -q
 
 lint:  ## Ruff + black --check
-	python3 -m ruff check src/ tests/ && black --check src/ tests/
+	python3 -m ruff check src/ tests/ dashboard/backend/ && black --check src/ tests/ dashboard/backend/
 
 format:  ## Auto-format with black and ruff --fix
-	black src/ tests/ && python3 -m ruff check --fix src/ tests/
+	black src/ tests/ dashboard/backend/ && python3 -m ruff check --fix src/ tests/ dashboard/backend/
 
 typecheck:  ## Run mypy
 	python3 -m mypy
